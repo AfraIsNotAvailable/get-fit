@@ -364,7 +364,7 @@ function render() {
       <span class="num">${fmt(t.reps)}</span>
     </div>`).join('') : '<div class="excell"><span class="nm">No exercises yet</span><span class="num">0</span></div>';
 
-  const hist = (v.recent || []).slice(0, 6).reverse();
+  const hist = (v.recent || []).slice(0, 6);
   $('recent').innerHTML = hist.length ? hist.map(h => {
     const words = { missed: 'missed', done: 'logged', late: 'logged late' };
     return `<div class="rrow">
@@ -374,7 +374,7 @@ function render() {
     </div>`;
   }).join('') : '<div class="empty">Nothing yet. The first set will show up here once it lands.</div>';
 
-  renderCalendar(v.calendar);
+  renderCalendar(v.calendar, Math.max(1, (v.months.rounds_per_day || 1) * (v.months.base_reps || 1)));
   tickClocks();
 }
 
@@ -382,9 +382,9 @@ function render() {
 const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 const CELL = 11;
 
-function hueFor(reps, max) {
-  const t = max > 0 ? Math.min(1, reps / max) : 0;
-  return 168 - 150 * t;          // teal (few) -> brick (many)
+function hueFor(reps, scale) {
+  const t = scale > 0 ? Math.min(1, reps / scale) : 0;
+  return 168 - 150 * t;          // teal (few) -> brick (a full day)
 }
 
 function paint(cv, fill, hue) {
@@ -416,15 +416,15 @@ function cellTitle(dateStr, info) {
   return `${nice} — ${info.reps} reps · ${info.done}/${info.rounds} rounds`;
 }
 
-function renderCalendar(cal) {
+function renderCalendar(cal, dayScale) {
   if (!cal) return;
-  const sig = cal.today + '|' + Object.keys(cal.days).length + '|'
+  const sig = cal.today + '|' + dayScale + '|' + Object.keys(cal.days).length + '|'
     + Object.values(cal.days).reduce((a, d) => a + Math.round(d.reps * 100 + d.rounds), 0);
   if (sig === calSignature) return;
   calSignature = sig;
 
   const days = cal.days || {};
-  const max = Math.max(1, cal.max_reps || 0);
+  const max = Math.max(1, dayScale || 0);
   const today = new Date(cal.today + 'T00:00:00');
   const start = new Date(cal.start + 'T00:00:00');
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));   // back to Monday
@@ -474,19 +474,17 @@ function renderCalendar(cal) {
   calEl.scrollLeft = calEl.scrollWidth;
 
   const key = $('calKey');
-  if (!key.dataset.built) {
-    key.dataset.built = '1';
-    [0.2, 0.45, 0.7, 1].forEach((f, i) => {
-      const cv = document.createElement('canvas');
-      paint(cv, f, hueFor((i + 1) / 4 * max, max));
-      key.appendChild(cv);
-    });
-  }
+  key.innerHTML = '';
+  [0.2, 0.45, 0.7, 1].forEach((f) => {
+    const cv = document.createElement('canvas');
+    paint(cv, f, hueFor(f * max, max));
+    key.appendChild(cv);
+  });
 }
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
   calSignature = '';            // repaint with the new palette
-  if (VIEW) renderCalendar(VIEW.calendar);
+  if (VIEW) renderCalendar(VIEW.calendar, Math.max(1, (VIEW.months.rounds_per_day || 1) * (VIEW.months.base_reps || 1)));
 });
 
 function tickClocks() {
