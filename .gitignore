@@ -1,0 +1,14 @@
+# runtime state written by getfit.py
+state.json
+tally.json
+.lock
+
+# local server / hook output
+server.log
+hook.log
+
+# screenshots
+preview.png
+
+__pycache__/
+*.pyc
