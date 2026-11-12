@@ -118,6 +118,14 @@ check("late confirmation restarts the interval clock",
       getfit.parse(state()["next_set_at"]) == CLOCK["now"] + timedelta(minutes=90),
       state()["next_set_at"])
 
+# 4b. the month gauge counts the reps of done rounds and knows its ceiling
+v = getfit.view()
+mo = v["months"]["current"]
+check("month reps come from done rounds", mo["reps"] == 35, mo)
+check("month ceiling is days x rounds/day x base stack",
+      mo["target"] == mo["days"] * v["months"]["rounds_per_day"] * v["months"]["base_reps"], mo)
+check("month history keeps one row per month", len(v["months"]["history"]) == 6, len(v["months"]["history"]))
+
 # 5. quiet hours: nothing fires between 00:00 and 07:00 local
 CLOCK["now"] = datetime(2026, 11, 13, 1, 30, tzinfo=timezone.utc)   # 03:30 Bucharest
 con = getfit.connect()

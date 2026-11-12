@@ -25,6 +25,7 @@ import re
 import sqlite3
 import sys
 import uuid
+import calendar as calmod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -468,6 +469,42 @@ def build_calendar(db: sqlite3.Connection, settings: dict, now: datetime) -> dic
             "max_reps": max([s["reps"] for s in days.values()], default=0)}
 
 
+def build_months(db: sqlite3.Connection, settings: dict, now: datetime) -> dict:
+    """Monthly reps against the ceiling a month allows: days × rounds per day × base stack."""
+    tz = tz_of(settings)
+    today = now.astimezone(tz).date()
+
+    qs = _hm_seconds(settings.get("quiet_start", "00:00")) // 60
+    qe = _hm_seconds(settings.get("quiet_end", "07:00")) // 60
+    quiet_minutes = 0 if qs == qe else ((qe - qs) % 1440 or 1440)
+    active_minutes = max(int(settings.get("interval_minutes", 90)), 1440 - quiet_minutes)
+    rounds_per_day = max(1, active_minutes // int(settings.get("interval_minutes", 90)))
+    base_reps = sum(r["reps"] for r in compose(settings, 0)) or 1
+
+    done = {row["m"]: int(row["reps"] or 0) for row in db.execute(
+        "SELECT substr(sent_local_date,1,7) m, SUM(target_reps) reps FROM rounds"
+        " WHERE status IN ('done','late') GROUP BY m").fetchall()}
+
+    months = []
+    first = today.replace(day=1)
+    for back in range(11, -1, -1):
+        y, m = first.year, first.month - back
+        while m <= 0:
+            m += 12
+            y -= 1
+        key = f"{y:04d}-{m:02d}"
+        days = calmod.monthrange(y, m)[1]
+        target = days * rounds_per_day * base_reps
+        reps = done.get(key, 0)
+        months.append({"month": key,
+                       "label": first.replace(year=y, month=m, day=1).strftime("%b"),
+                       "year": y, "days": days, "target": target, "reps": reps,
+                       "ratio": (reps / target) if target else 0.0,
+                       "current": key == today.strftime("%Y-%m")})
+    return {"rounds_per_day": rounds_per_day, "base_reps": base_reps,
+            "current": months[-1], "history": months[-6:]}
+
+
 def view() -> dict:
     db = connect()
     init_db(db)
@@ -532,6 +569,7 @@ def view() -> dict:
         "preview": compose(settings, state["bonus"]),
         "quiet_now": not in_active_window(now, settings),
         "calendar": build_calendar(db, settings, now),
+        "months": build_months(db, settings, now),
     }
     db.close()
     return out
