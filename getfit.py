@@ -623,7 +623,7 @@ def cmd_migrate() -> int:
     for h in list(state.get("history", [])) + ([state["current"]] if state.get("current") else []):
         if not (h.get("exercises") or []):
             continue
-        merged[h.get("set") or uuid.uuid4().hex[:12]] = h
+        merged[h.get("set") or h.get("id") or uuid.uuid4().hex[:12]] = h
 
     imported = 0
     for key, h in merged.items():
