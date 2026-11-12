@@ -1,11 +1,7 @@
-# runtime state written by getfit.py
-state.json
-tally.json
-.lock
-
 # local server / hook output
 server.log
 hook.log
+.lock
 
 # screenshots
 preview.png
