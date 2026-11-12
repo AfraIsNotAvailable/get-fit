@@ -315,8 +315,9 @@ function render() {
   // month gauge
   const mo = v.months, curMonth = mo.current;
   $('railMonth').textContent = `${curMonth.label} ${curMonth.year}`;
-  $('gaugePct').textContent = Math.round(curMonth.ratio * 100) + '%';
-  $('gaugeFill').style.height = Math.min(100, curMonth.ratio * 100) + '%';
+  const pctRaw = curMonth.ratio * 100;
+  $('gaugePct').textContent = (pctRaw > 0 && pctRaw < 10 ? pctRaw.toFixed(1) : Math.round(pctRaw)) + '%';
+  $('gaugeFill').style.height = `max(2px, ${Math.min(100, pctRaw)}%)`;
   $('gaugeReps').textContent = fmt(curMonth.reps);
   $('gaugeTarget').textContent = fmt(curMonth.target);
   $('mhist').innerHTML = mo.history.map(h => `
@@ -367,7 +368,7 @@ function render() {
       <span class="val">${t.reps}</span>
     </div>`).join('');
 
-  const hist = (v.recent || []).slice().reverse().slice(0, 6);
+  const hist = (v.recent || []).slice(0, 6).reverse();
   $('recent').innerHTML = hist.length ? hist.map(h => {
     const words = { missed: 'missed', done: 'logged', late: 'logged late' };
     return `<div class="rrow">

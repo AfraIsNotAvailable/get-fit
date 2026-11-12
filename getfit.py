@@ -530,7 +530,7 @@ def view() -> dict:
     rows = db.execute(
         "SELECT r.*, GROUP_CONCAT(ri.reps || '×' || ri.exercise_name, '|') AS items"
         " FROM rounds r LEFT JOIN round_items ri ON ri.round_id = r.id"
-        " GROUP BY r.id ORDER BY r.id DESC LIMIT 12"
+        " GROUP BY r.id ORDER BY r.sent_at DESC, r.id DESC LIMIT 12"
     ).fetchall()
     for row in rows:
         items = []
