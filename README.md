@@ -7,10 +7,12 @@ Escalating workout stack, driven by Hermes cron + a Telegram confirmation.
 - `getfit.py tick` runs **every minute** from a Hermes no-LLM cron job. It is silent unless a
   set is due, so the only thing that ever reaches Telegram is the set itself.
 - A set is due every `interval_minutes` (90) while outside the quiet window (00:00–07:00 local).
-  Sending a set starts the `response_minutes` (10) clock.
-- Confirm on Telegram ("done", "did it", ...) → the set is logged in `tally.json` and the stack
-  resets to the minimums. The gateway hook `~/.hermes/hooks/getfit-confirm/` does this the moment
-  the message arrives.
+  Sending a set opens a **round** with a `response_minutes` (10) clock. The 90 minute clock does
+  not run during an open round — it starts when the round closes, either because you confirmed or
+  because the window expired.
+- Confirm on Telegram ("done", "did it", ...) → the set is logged in `tally.json`, the stack resets
+  to the minimums, and the next 90 minute clock starts. The gateway hook
+  `~/.hermes/hooks/getfit-confirm/` does this the moment the message arrives.
 - No reply inside the window → `+1` rep on the next set. The bonus is applied to the first
   exercise up to its max, then overflows to the next exercise in list order (which joins at its
   own minimum), and so on. The last exercise has no overflow target and just absorbs everything.

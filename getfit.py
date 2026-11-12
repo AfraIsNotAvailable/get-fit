@@ -209,9 +209,16 @@ def _start_set(settings: dict, state: dict, now: datetime) -> dict:
         "bonus_applied": state.get("bonus", 0),
     }
     state["current"] = current
+    # the interval clock does not run while a round is open; it starts when the
+    # round is answered or abandoned (see _close_round)
+    state["next_set_at"] = None
+    return current
+
+
+def _close_round(state: dict, settings: dict, now: datetime) -> None:
+    """Start the interval clock that leads to the next set."""
     interval = int(settings.get("interval_minutes", 90))
     state["next_set_at"] = iso(clamp_to_active(now + timedelta(minutes=interval), settings))
-    return current
 
 
 def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
@@ -222,7 +229,8 @@ def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
         dirty = False
 
         cur = state.get("current")
-        if cur and cur.get("status") == "pending" and now >= parse(cur["deadline"]):
+        open_round = bool(cur and cur.get("status") == "pending")
+        if open_round and now >= parse(cur["deadline"]):
             cur["status"] = "missed"
             cur["missed_at"] = iso(now)
             state["bonus"] = int(state.get("bonus", 0)) + 1
@@ -232,11 +240,13 @@ def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
             tally["sets_missed"] = int(tally.get("sets_missed", 0)) + 1
             if not dry_run:
                 save_json(TALLY_PATH, tally)
+            _close_round(state, settings, now)
+            open_round = False
             dirty = True
 
         message = None
         next_at = state.get("next_set_at")
-        due = next_at is None or now >= parse(next_at)
+        due = (not open_round) and next_at is not None and now >= parse(next_at)
         if due and (force or in_active_window(now, settings)):
             current = _start_set(settings, state, now)
             dirty = True
@@ -274,6 +284,7 @@ def cmd_confirm(source: str = "") -> int:
         cur["source"] = source
         state["history"].append({"set": cur["id"], "status": cur["status"],
                                  "at": iso(now), "exercises": cur["exercises"]})
+        _close_round(state, settings, now)
         save_json(TALLY_PATH, tally)
         save_json(STATE_PATH, state)
 
@@ -327,6 +338,7 @@ def view() -> dict:
                        "reps": int(slot.get("reps", 0)), "active": False})
 
     cur = state.get("current")
+    round_open = bool(cur and cur.get("status") == "pending")
     current = None
     if cur:
         current = dict(cur)
@@ -337,9 +349,21 @@ def view() -> dict:
     next_set = None
     if nxt:
         when = parse(nxt)
-        next_set = {"at": iso(when),
-                    "local": when.astimezone(tz).strftime("%H:%M"),
-                    "seconds_left": max(0, int((when - now).total_seconds()))}
+        eff = clamp_to_active(when, settings)
+        next_set = {"at": iso(eff),
+                    "local": eff.astimezone(tz).strftime("%H:%M"),
+                    "deferred": eff != when,
+                    "scheduled": iso(when),
+                    "seconds_left": max(0, int((eff - now).total_seconds()))}
+
+    recent = []
+    for h in state.get("history", [])[-12:]:
+        item = dict(h)
+        try:
+            item["local"] = parse(h["at"]).astimezone(tz).strftime("%H:%M")
+        except Exception:
+            item["local"] = ""
+        recent.append(item)
 
     preview = compose(settings, int(state.get("bonus", 0)))
     return {
@@ -348,10 +372,11 @@ def view() -> dict:
         "timezone": settings.get("timezone"),
         "settings": settings,
         "state": {k: v for k, v in state.items() if k != "history"},
-        "recent": state.get("history", [])[-12:],
+        "recent": recent,
         "tally": tally,
         "totals": totals,
         "current": current,
+        "round_open": round_open,
         "next_set": next_set,
         "preview": preview,
         "quiet_now": not in_active_window(now, settings),
