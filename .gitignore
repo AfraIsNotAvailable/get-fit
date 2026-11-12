@@ -8,3 +8,10 @@ preview.png
 
 __pycache__/
 *.pyc
+
+# legacy json export of the pre-database store
+legacy/
+
+# sqlite sidecars
+getfit.db-wal
+getfit.db-shm

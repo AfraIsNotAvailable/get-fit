@@ -9,11 +9,13 @@
   :root{
     --paper:#faf9f6; --ink:#191917; --muted:#5f5d57; --faint:#7d7a72;
     --line:#dcd9d2; --line2:#b9b5ab; --accent:#8d2f1b; --field:#fffefb;
+    --cal-empty:#e7e4dc;
   }
   @media (prefers-color-scheme: dark){
     :root{
       --paper:#141413; --ink:#e9e6df; --muted:#a8a49a; --faint:#89857c;
       --line:#2d2c28; --line2:#43413b; --accent:#d07a63; --field:#1a1a18;
+      --cal-empty:#232220;
     }
   }
   *{box-sizing:border-box; border-radius:0}
@@ -23,6 +25,7 @@
     -webkit-font-smoothing:antialiased;
   }
   .wrap{max-width:760px; margin:0 auto; padding:38px 26px 96px}
+  a{color:inherit}
 
   /* masthead */
   .masthead{
@@ -30,7 +33,10 @@
     padding-bottom:10px; border-bottom:1px solid var(--line2);
     font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted);
   }
-  .brand{color:var(--ink); font-weight:600; letter-spacing:.17em; white-space:nowrap}
+  .masthead .left{display:flex; align-items:baseline; gap:18px}
+  .brand{color:var(--ink); font-weight:600; letter-spacing:.17em; white-space:nowrap; text-decoration:none}
+  .navlink{color:var(--faint); text-decoration:none; border-bottom:1px solid transparent}
+  .navlink:hover{color:var(--ink); border-bottom-color:var(--line2)}
   .stamp{font-variant-numeric:tabular-nums; letter-spacing:.07em; text-align:right}
 
   h1{font-size:32px; font-weight:500; letter-spacing:-.02em; margin:36px 0 8px}
@@ -58,9 +64,22 @@
   .now .status{color:var(--muted)}
   .cell.live .status{color:var(--accent)}
 
-  /* ledger */
+  /* blocks */
   .block{margin:0 0 36px}
   .block-head{display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding-bottom:9px; border-bottom:1px solid var(--line2)}
+
+  /* calendar */
+  .cal-months{position:relative; height:15px; margin-top:12px; color:var(--faint); font-size:10px; letter-spacing:.1em; text-transform:uppercase}
+  .cal-months span{position:absolute; top:0; white-space:nowrap}
+  .cal{display:flex; gap:2px; overflow-x:auto; scrollbar-width:thin}
+  .cal .week{display:flex; flex-direction:column; gap:2px}
+  .cal canvas{display:block; width:11px; height:11px}
+  .cal .spacer{width:11px; height:11px}
+  .cal-legend{display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--faint); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase}
+  .cal-legend canvas{display:block; width:11px; height:11px}
+  .cal-legend .hint{margin-left:auto; letter-spacing:.02em; text-transform:none; font-size:12px; color:var(--faint)}
+
+  /* ledger */
   .ledger{padding-top:8px}
   .lrow{display:flex; align-items:baseline; padding:7px 0}
   .lrow .name{font-size:15px}
@@ -72,58 +91,15 @@
   .gone{color:var(--faint); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; margin-left:8px}
 
   /* recent */
-  .rrow{display:grid; grid-template-columns:46px 1fr auto; gap:14px; align-items:baseline; padding:8px 0; border-top:1px solid var(--line)}
+  .rrow{display:grid; grid-template-columns:88px 1fr auto; gap:14px; align-items:baseline; padding:8px 0; border-top:1px solid var(--line)}
   .rrow:first-child{border-top:none}
-  .rrow .t{color:var(--faint); font-size:12.5px; font-variant-numeric:tabular-nums}
+  .rrow .t{color:var(--faint); font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap}
   .rrow .what{font-size:14px}
   .rrow .what b{font-weight:600; font-variant-numeric:tabular-nums}
   .rrow .res{font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; font-weight:600; color:var(--muted)}
   .rrow .res.missed{color:var(--accent)}
   .empty{color:var(--faint); font-size:13.5px; padding:12px 0}
 
-  /* settings */
-  .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:16px; padding:16px 0 4px}
-  .f label{display:block; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:5px}
-  .f.wide{grid-column:span 2}
-  input{
-    width:100%; background:var(--field); color:var(--ink);
-    border:1px solid var(--line2); padding:7px 9px; font:inherit; font-variant-numeric:tabular-nums;
-  }
-  input:focus{outline:none; border-color:var(--ink)}
-  input:disabled{color:var(--faint); background:transparent; border-style:dashed}
-
-  .ex-head-row, .ex{display:grid; grid-template-columns:22px 1fr 78px 78px 92px; gap:12px; align-items:center}
-  .ex-head-row{padding:24px 0 6px; color:var(--faint); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:600}
-  .ex{padding:9px 0; border-top:1px solid var(--line)}
-  .idx{color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums}
-  .clab{display:none}
-  .tools{display:flex; gap:6px; justify-content:flex-end}
-  .icon{
-    background:transparent; border:1px solid var(--line2); color:var(--muted);
-    width:26px; height:26px; font-size:12px; line-height:1; cursor:pointer; padding:0;
-  }
-  .icon:hover:not(:disabled){color:var(--ink); border-color:var(--ink)}
-  .icon:disabled{opacity:.28; cursor:default}
-  .addrow{border-top:1px solid var(--line); padding:10px 0}
-  .link{
-    background:none; border:none; padding:0; font:inherit; font-size:13.5px;
-    color:var(--muted); cursor:pointer; border-bottom:1px solid var(--line2);
-  }
-  .link:hover{color:var(--ink); border-color:var(--ink)}
-
-  .btn{
-    background:var(--ink); color:var(--paper); border:1px solid var(--ink);
-    padding:9px 16px; font:inherit; font-size:13.5px; cursor:pointer;
-  }
-  .btn:hover{opacity:.85}
-  .btn.ghost{background:transparent; color:var(--ink); border-color:var(--line2)}
-  .btn.ghost:hover{border-color:var(--ink); opacity:1}
-  button:focus-visible, input:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
-  .actions{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:22px}
-  .msg{font-size:13px; color:var(--muted); margin-left:auto}
-  .msg.ok{color:var(--ink)}
-  .msg.err{color:var(--accent)}
-  .note{color:var(--faint); font-size:12.5px; line-height:1.7; margin:20px 0 0; max-width:62ch}
   footer{margin-top:44px; padding-top:14px; border-top:1px solid var(--line); color:var(--faint); font-size:12.5px; line-height:1.75; max-width:64ch}
 
   @media (max-width:640px){
@@ -132,25 +108,18 @@
     .clock{font-size:46px}
     .stamp .tz{display:none}
     .stamp{font-size:10px}
-    .ex-head-row{display:none}
-    .ex{grid-template-columns:22px 1fr 1fr; row-gap:12px; padding:14px 0;
-        grid-template-areas:"i name name" ". min max" ". tools tools"}
-    .ex .idx{grid-area:i; align-self:end; padding-bottom:8px}
-    .ex .cellname{grid-area:name}
-    .ex .fmin{grid-area:min}
-    .ex .fmax{grid-area:max}
-    .ex .tools{grid-area:tools; justify-content:flex-start}
-    .clab{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:4px}
-    .f.wide{grid-column:span 1}
-    .actions{gap:10px}
-    .msg{margin-left:0; flex-basis:100%}
+    .rrow{grid-template-columns:78px 1fr auto; gap:10px}
+    .cal-legend .hint{display:none}
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="masthead">
-    <span class="brand">Get fit</span>
+    <span class="left">
+      <a class="brand" href="/">Get fit</a>
+      <a class="navlink" href="/settings">Settings</a>
+    </span>
     <span class="stamp" id="stamp">—</span>
   </div>
 
@@ -180,6 +149,19 @@
 
   <section class="block">
     <div class="block-head">
+      <span class="label">Activity</span>
+      <span class="label" id="calNote">last 12 months</span>
+    </div>
+    <div class="cal-months" id="calMonths"></div>
+    <div class="cal" id="cal"></div>
+    <div class="cal-legend">
+      <span>less</span><span id="calKey" style="display:flex;gap:2px"></span><span>more</span>
+      <span class="hint">dot density = share of the day’s rounds finished · hue = reps</span>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
       <span class="label">Lifetime</span>
       <span class="label" id="since">no sets logged yet</span>
     </div>
@@ -194,35 +176,8 @@
     <div id="recent"></div>
   </section>
 
-  <section class="block">
-    <div class="block-head">
-      <span class="label">Settings</span>
-      <span class="label">saved to settings.json</span>
-    </div>
-    <div class="fields">
-      <div class="f"><label>Interval, min</label><input type="number" id="interval" min="1" max="1440"></div>
-      <div class="f"><label>Answer within, min</label><input type="number" id="response" min="1" max="240"></div>
-      <div class="f"><label>Quiet from</label><input type="text" id="quietStart" inputmode="numeric" placeholder="23:00"></div>
-      <div class="f"><label>Quiet until</label><input type="text" id="quietEnd" inputmode="numeric" placeholder="07:00"></div>
-      <div class="f wide"><label>Timezone</label><input type="text" id="tz" placeholder="Europe/Bucharest"></div>
-    </div>
-
-    <div class="ex-head-row">
-      <span>#</span><span>Exercise</span><span>Minimum</span><span>Max</span><span>Order</span>
-    </div>
-    <div id="exRows"></div>
-    <div class="addrow"><button class="link" id="addEx">Add exercise</button></div>
-
-    <div class="actions">
-      <button class="btn ghost" id="notifyBtn">Enable laptop alerts</button>
-      <button class="btn" id="save">Save settings</button>
-      <span class="msg" id="saveMsg"></span>
-    </div>
-    <p class="note">Overflow runs top to bottom: reps past an exercise’s max land on the next one, which joins at its own minimum. The last exercise has no max — it takes whatever is left.</p>
-  </section>
-
   <footer>
-    No sets between <span id="footQuiet">00:00 and 07:00</span>, and a penalty earned at night is still there in the morning.
+    No sets between <span id="footQuiet">23:00 and 07:00</span>, and a penalty earned at night is still there in the morning.
     Answering after the window logs the set but adds two push-ups instead of one.
   </footer>
 </div>
@@ -231,7 +186,7 @@
 const $ = (id) => document.getElementById(id);
 let VIEW = null;
 let clockOffset = 0;
-let configDirty = false;
+let calSignature = '';
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmtClock = (s) => {
@@ -240,11 +195,8 @@ const fmtClock = (s) => {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
 };
 const serverNow = () => Date.now() + clockOffset;
-const normTime = (v) => {
-  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})$/);
-  return m ? `${pad(+m[1])}:${m[2]}` : String(v).trim();
-};
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 async function load() {
   try {
@@ -258,21 +210,20 @@ async function load() {
 }
 
 function render() {
-  const v = VIEW;
+  const v = VIEW, s = v.settings;
   const d = new Date(v.now);
   $('stamp').innerHTML = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
     + ' · ' + v.now_local + '<span class="tz"> · ' + v.timezone + '</span>';
 
-  const s = v.settings;
   if (v.tally.started_at) {
     $('since').textContent = 'since ' + new Date(v.tally.started_at)
       .toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
     $('lede').textContent = `A set every ${s.interval_minutes} minutes, ${s.quiet_end} to ${s.quiet_start} local, `
       + `answered on Telegram within ${s.response_minutes} minutes.`;
   }
+  $('footQuiet').textContent = `${s.quiet_start} and ${s.quiet_end}`;
   $('stats').textContent = `${v.tally.sets_done || 0} logged, ${v.tally.sets_missed || 0} missed`;
 
-  // next set / open round
   const pending = !!(v.current && v.current.status === 'pending');
   if (pending) {
     $('nextLabel').textContent = 'Round ends in';
@@ -292,7 +243,6 @@ function render() {
       : 'not scheduled';
   }
 
-  // current set
   const cur = v.current;
   $('nowCell').classList.toggle('live', !!cur && cur.status === 'pending');
   if (!cur) {
@@ -307,7 +257,6 @@ function render() {
     $('nowTick').textContent = 'sent ' + (cur.local_sent || '');
   }
 
-  // ledger
   const rows = v.totals.filter(t => t.id !== '_summary');
   $('ledger').innerHTML = rows.map(t => `
     <div class="lrow ${t.reps ? '' : 'zero'}">
@@ -321,21 +270,130 @@ function render() {
       <span class="val">${(v.totals.find(t => t.id === '_summary') || {}).reps ?? 0}</span>
     </div>`;
 
-  // recent
   const hist = (v.recent || []).slice().reverse().slice(0, 6);
   $('recent').innerHTML = hist.length ? hist.map(h => {
     const words = { missed: 'missed', done: 'logged', late: 'logged late' };
-    const cls = h.status === 'missed' ? 'missed' : '';
     return `<div class="rrow">
-      <span class="t">${h.local || ''}</span>
+      <span class="t">${h.day || ''} ${h.local || ''}</span>
       <span class="what">${h.exercises.map(e => `<b>${e.reps}</b> ${esc(e.name)}`).join(', ')}</span>
-      <span class="res ${cls}">${words[h.status] || h.status}</span>
+      <span class="res ${h.status === 'missed' ? 'missed' : ''}">${words[h.status] || h.status}</span>
     </div>`;
   }).join('') : '<div class="empty">Nothing yet. The first set will show up here once it lands.</div>';
 
-  if (!configDirty) { fillConfig(s); renderEx(); }
+  renderCalendar(v.calendar);
   tickClocks();
 }
+
+/* ------------------------------ calendar ------------------------------ */
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+const CELL = 11;
+
+function hueFor(reps, max) {
+  const t = max > 0 ? Math.min(1, reps / max) : 0;
+  return 168 - 150 * t;          // teal (few) -> brick (many)
+}
+
+function paint(cv, fill, hue) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== Math.round(CELL * dpr)) {
+    cv.width = Math.round(CELL * dpr);
+    cv.height = Math.round(CELL * dpr);
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, CELL, CELL);
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--cal-empty').trim() || '#e7e4dc';
+  ctx.fillRect(0, 0, CELL, CELL);
+  if (fill <= 0) return;
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  ctx.fillStyle = `hsl(${hue.toFixed(0)} ${dark ? 52 : 42}% ${dark ? 62 : 45}%)`;
+  const sub = CELL / 4;
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      if ((BAYER[y][x] + 0.5) / 16 <= fill) ctx.fillRect(x * sub, y * sub, sub, sub);
+    }
+  }
+}
+
+function cellTitle(dateStr, info) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const nice = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  if (!info || !info.rounds) return `${nice} — no rounds`;
+  return `${nice} — ${info.reps} reps · ${info.done}/${info.rounds} rounds`;
+}
+
+function renderCalendar(cal) {
+  if (!cal) return;
+  const sig = cal.today + '|' + Object.keys(cal.days).length + '|'
+    + Object.values(cal.days).reduce((a, d) => a + Math.round(d.reps * 100 + d.rounds), 0);
+  if (sig === calSignature) return;
+  calSignature = sig;
+
+  const days = cal.days || {};
+  const max = Math.max(1, cal.max_reps || 0);
+  const today = new Date(cal.today + 'T00:00:00');
+  const start = new Date(cal.start + 'T00:00:00');
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));   // back to Monday
+
+  const calEl = $('cal');
+  calEl.innerHTML = '';
+  const monthsEl = $('calMonths');
+  monthsEl.innerHTML = '';
+
+  const cursor = new Date(start);
+  let weekIndex = 0, lastMonth = -1;
+  const frag = document.createDocumentFragment();
+
+  while (cursor <= today) {
+    const week = document.createElement('div');
+    week.className = 'week';
+    for (let i = 0; i < 7; i++) {
+      if (cursor > today) {
+        const sp = document.createElement('div');
+        sp.className = 'spacer';
+        week.appendChild(sp);
+      } else {
+        const key = isoDay(cursor);
+        const info = days[key];
+        const cv = document.createElement('canvas');
+        cv.title = cellTitle(key, info);
+        const fill = info && info.rounds ? info.done / info.rounds : 0;
+        paint(cv, fill, hueFor(info ? info.reps : 0, max));
+        week.appendChild(cv);
+      }
+      if (i === 0) {
+        const m = cursor.getMonth();
+        if (m !== lastMonth) {
+          lastMonth = m;
+          const lbl = document.createElement('span');
+          lbl.textContent = cursor.toLocaleDateString(undefined, { month: 'short' });
+          lbl.style.left = (weekIndex * (CELL + 2)) + 'px';
+          monthsEl.appendChild(lbl);
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    frag.appendChild(week);
+    weekIndex++;
+  }
+  calEl.appendChild(frag);
+  calEl.scrollLeft = calEl.scrollWidth;
+
+  const key = $('calKey');
+  if (!key.dataset.built) {
+    key.dataset.built = '1';
+    [0.2, 0.45, 0.7, 1].forEach((f, i) => {
+      const cv = document.createElement('canvas');
+      paint(cv, f, hueFor((i + 1) / 4 * max, max));
+      key.appendChild(cv);
+    });
+  }
+}
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  calSignature = '';            // repaint with the new palette
+  if (VIEW) renderCalendar(VIEW.calendar);
+});
 
 function tickClocks() {
   if (!VIEW) return;
@@ -377,116 +435,6 @@ function flashTitle() {
     if (document.hasFocus()) { clearInterval(titleTimer); titleTimer = null; document.title = base; }
   }, 1100);
 }
-
-/* config */
-function fillConfig(s) {
-  $('interval').value = s.interval_minutes;
-  $('response').value = s.response_minutes;
-  $('quietStart').value = s.quiet_start;
-  $('quietEnd').value = s.quiet_end;
-  $('tz').value = s.timezone;
-  $('footQuiet').textContent = `${s.quiet_start} and ${s.quiet_end}`;
-  window.__rows = s.exercises.map(e => ({ ...e }));
-}
-const rows = () => window.__rows || [];
-
-function renderEx() {
-  const list = rows();
-  $('exRows').innerHTML = list.map((raw, i) => {
-    const e = { ...raw, isLast: i === list.length - 1 };
-    return `
-    <div class="ex" data-i="${i}">
-      <span class="idx">${i + 1}</span>
-      <span class="cellname">
-        <span class="clab">Exercise</span>
-        <input type="text" value="${esc(e.name)}" data-k="name" data-i="${i}" maxlength="40" aria-label="Name">
-      </span>
-      <span class="fmin">
-        <span class="clab">Minimum</span>
-        <input type="number" min="0" value="${e.min}" data-k="min" data-i="${i}" aria-label="Minimum">
-      </span>
-      <span class="fmax">
-        <span class="clab">Max</span>
-        <input type="number" min="0" value="${e.isLast ? '' : (e.max ?? '')}" data-k="max" data-i="${i}" aria-label="Maximum"
-               ${e.isLast ? 'disabled placeholder="none"' : ''}>
-      </span>
-      <span class="tools">
-        <button class="icon" data-move="-1" data-i="${i}" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
-        <button class="icon" data-move="1" data-i="${i}" title="Move down" aria-label="Move down" ${i === list.length - 1 ? 'disabled' : ''}>↓</button>
-        <button class="icon" data-del="${i}" title="Remove" aria-label="Remove" ${list.length <= 1 ? 'disabled' : ''}>×</button>
-      </span>
-    </div>`;
-  }).join('');
-}
-
-$('exRows').addEventListener('input', (ev) => {
-  const t = ev.target, i = +t.dataset.i, k = t.dataset.k;
-  if (!k) return;
-  configDirty = true;
-  rows()[i][k] = k === 'name' ? t.value : (t.value === '' ? null : +t.value);
-});
-
-$('exRows').addEventListener('click', (ev) => {
-  const btn = ev.target.closest('button');
-  if (!btn || btn.disabled) return;
-  const list = rows();
-  if (btn.dataset.del !== undefined) {
-    list.splice(+btn.dataset.del, 1);
-  } else if (btn.dataset.move) {
-    const i = +btn.dataset.i, j = i + +btn.dataset.move;
-    if (j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-  } else return;
-  configDirty = true;
-  renderEx();
-});
-
-$('addEx').addEventListener('click', () => {
-  rows().push({ id: '', name: 'New exercise', min: 5, max: null });
-  configDirty = true;
-  renderEx();
-});
-
-$('save').addEventListener('click', async () => {
-  const settings = {
-    interval_minutes: +$('interval').value,
-    response_minutes: +$('response').value,
-    quiet_start: normTime($('quietStart').value) || '00:00',
-    quiet_end: normTime($('quietEnd').value) || '07:00',
-    timezone: $('tz').value.trim() || 'UTC',
-    exercises: rows().map(e => ({
-      id: e.id, name: e.name, min: +e.min || 0,
-      max: e.max === null || e.max === '' ? null : +e.max,
-    })),
-  };
-  const msg = $('saveMsg');
-  try {
-    const r = await fetch('/api/settings', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings }),
-    });
-    const out = await r.json();
-    if (!r.ok || !out.ok) throw new Error(out.error || 'save failed');
-    configDirty = false;
-    msg.className = 'msg ok';
-    msg.textContent = 'Saved';
-    window.__rows = out.settings.exercises.map(e => ({ ...e }));
-    renderEx();
-    load();
-    setTimeout(() => { msg.textContent = ''; }, 3000);
-  } catch (e) {
-    msg.className = 'msg err';
-    msg.textContent = e.message;
-  }
-});
-
-$('notifyBtn').addEventListener('click', async () => {
-  const msg = $('saveMsg');
-  if (!('Notification' in window)) { msg.className = 'msg err'; msg.textContent = 'This browser has no notifications.'; return; }
-  const p = await Notification.requestPermission();
-  msg.className = 'msg ' + (p === 'granted' ? 'ok' : 'err');
-  msg.textContent = p === 'granted' ? 'Laptop alerts on' : 'Alerts blocked in this browser';
-});
 
 load();
 setInterval(load, 10000);

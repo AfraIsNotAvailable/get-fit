@@ -115,6 +115,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.split("?")[0] in ("/api/state", "/api/state/"):
             return self._json(getfit.view())
+        if self.path.split("?")[0] in ("/settings", "/settings/"):
+            self.path = "/settings.html"
         if self.path in ("/", ""):
             self.path = "/index.html"
         return super().do_GET()
@@ -132,8 +134,13 @@ class Handler(SimpleHTTPRequestHandler):
                 clean = validate(raw.get("settings", raw))
             except (ValueError, TypeError) as exc:
                 return self._json({"ok": False, "error": str(exc)}, 400)
-            getfit.save_json(getfit.SETTINGS_PATH, clean)
-            return self._json({"ok": True, "settings": clean, "saved_at":
+            db = getfit.connect()
+            try:
+                getfit.init_db(db)
+                saved = getfit.save_settings(db, clean)
+            finally:
+                db.close()
+            return self._json({"ok": True, "settings": saved, "saved_at":
                                datetime.now(timezone.utc).isoformat()})
 
         if route == "/api/confirm":

@@ -1,35 +1,39 @@
 #!/usr/bin/env python3
-"""get-fit — escalating workout stack engine.
+"""get-fit — escalating workout stack engine (SQLite store).
 
-Files next to this script:
-  settings.json  what the web UI writes (exercises, minimums, caps, windows)
-  state.json     runtime state the engine keeps (current set, deadline, bonus)
-  tally.json     lifetime reps per exercise id (survives exercise removal)
+Entities
+  settings      one row: timezone, interval, response window, quiet hours
+  exercises     the stack, ordered by position; removed ones stay with active=0
+  rounds        one row per set that was sent (sent/deadline/status/resolved)
+  round_items   what each round asked for, per exercise (reps + name snapshot)
 
-CLI:
+Derived
+  tally         opening balances (imported legacy totals) + reps of done/late rounds
+  calendar      per local day: rounds sent, rounds done, reps, per-exercise split
+
+CLI
   getfit.py tick [--dry-run] [--force]   send a set if one is due (cron calls this)
-  getfit.py confirm [--source X]         log the current set as done (hook calls this)
-  getfit.py status                       human summary
-  getfit.py state                        raw JSON for the web UI
-  getfit.py reset [--keep-tally]         wipe runtime state
+  getfit.py confirm [--source X]         log the current round as done (hook calls this)
+  getfit.py status | state | report      inspect
+  getfit.py reset [--keep-tally]         wipe rounds
+  getfit.py migrate                      import legacy settings/state/tally json
 """
 from __future__ import annotations
 
-import fcntl
 import json
-import os
+import re
+import sqlite3
 import sys
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 BASE = Path(__file__).resolve().parent
-SETTINGS_PATH = BASE / "settings.json"
-STATE_PATH = BASE / "state.json"
-TALLY_PATH = BASE / "tally.json"
-LOCK_PATH = BASE / ".lock"
+DB_PATH = BASE / "getfit.db"
+LEGACY_SETTINGS = BASE / "settings.json"
+LEGACY_STATE = BASE / "state.json"
+LEGACY_TALLY = BASE / "tally.json"
 
 DEFAULT_SETTINGS = {
     "timezone": "Europe/Bucharest",
@@ -39,39 +43,100 @@ DEFAULT_SETTINGS = {
     "quiet_end": "07:00",
     "exercises": [
         {"id": "pushups", "name": "Push-ups", "min": 10, "max": 20},
-        {"id": "squats", "name": "Squats", "min": 5, "max": 30},
+        {"id": "squats", "name": "Squats", "min": 5, "max": None},
     ],
 }
 
-DEFAULT_TALLY = {"started_at": None, "totals": {}, "sets_done": 0, "sets_missed": 0}
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  timezone TEXT NOT NULL,
+  interval_minutes INTEGER NOT NULL,
+  response_minutes INTEGER NOT NULL,
+  quiet_start TEXT NOT NULL,
+  quiet_end TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS exercises (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  min_reps INTEGER NOT NULL,
+  max_reps INTEGER,
+  position INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  retired_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  round_key TEXT NOT NULL UNIQUE,
+  sent_at TEXT NOT NULL,
+  sent_local_date TEXT NOT NULL,
+  deadline_at TEXT NOT NULL,
+  resolved_at TEXT,
+  status TEXT NOT NULL,
+  bonus_applied INTEGER NOT NULL DEFAULT 0,
+  target_reps INTEGER NOT NULL DEFAULT 0,
+  source TEXT
+);
+
+CREATE TABLE IF NOT EXISTS round_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  round_id INTEGER NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  exercise_slug TEXT NOT NULL,
+  exercise_name TEXT NOT NULL,
+  reps INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS opening_balance (
+  exercise_slug TEXT PRIMARY KEY,
+  exercise_name TEXT NOT NULL,
+  reps INTEGER NOT NULL,
+  recorded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  bonus INTEGER NOT NULL DEFAULT 0,
+  next_set_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rounds_date ON rounds(sent_local_date);
+CREATE INDEX IF NOT EXISTS idx_items_round ON round_items(round_id);
+"""
 
 
-# ---------------------------------------------------------------- io helpers
-def load_json(path: Path, default):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return json.loads(json.dumps(default))
+# ---------------------------------------------------------------- io
+def connect() -> sqlite3.Connection:
+    db = sqlite3.connect(DB_PATH, timeout=15)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    return db
 
 
-def save_json(path: Path, obj) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
-    os.replace(tmp, path)
-
-
-@contextmanager
-def lock():
-    fh = open(LOCK_PATH, "a+")
-    try:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(fh, fcntl.LOCK_UN)
-        fh.close()
+def init_db(db: sqlite3.Connection) -> None:
+    db.executescript(SCHEMA)
+    if not db.execute("SELECT 1 FROM settings WHERE id=1").fetchone():
+        s = DEFAULT_SETTINGS
+        db.execute(
+            "INSERT INTO settings (id, timezone, interval_minutes, response_minutes, quiet_start, quiet_end)"
+            " VALUES (1, ?, ?, ?, ?, ?)",
+            (s["timezone"], s["interval_minutes"], s["response_minutes"], s["quiet_start"], s["quiet_end"]),
+        )
+        stamp = iso(now_utc())
+        for pos, ex in enumerate(s["exercises"]):
+            db.execute(
+                "INSERT INTO exercises (slug, name, min_reps, max_reps, position, active, created_at)"
+                " VALUES (?, ?, ?, ?, ?, 1, ?)",
+                (ex["id"], ex["name"], ex["min"], ex["max"], pos, stamp),
+            )
+    if not db.execute("SELECT 1 FROM app_state WHERE id=1").fetchone():
+        db.execute("INSERT INTO app_state (id, bonus, next_set_at, created_at) VALUES (1, 0, ?, ?)",
+                   (iso(now_utc()), iso(now_utc())))
+    db.commit()
 
 
 def now_utc() -> datetime:
@@ -88,30 +153,92 @@ def parse(value) -> datetime:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def load_settings() -> dict:
-    st = load_json(SETTINGS_PATH, DEFAULT_SETTINGS)
-    merged = json.loads(json.dumps(DEFAULT_SETTINGS))
-    merged.update({k: v for k, v in st.items() if k != "exercises"})
-    if st.get("exercises"):
-        merged["exercises"] = st["exercises"]
-    return merged
+# ---------------------------------------------------------------- settings
+def load_settings(db: sqlite3.Connection) -> dict:
+    row = db.execute("SELECT * FROM settings WHERE id=1").fetchone()
+    rows = db.execute("SELECT * FROM exercises WHERE active=1 ORDER BY position, id").fetchall()
+    return {
+        "timezone": row["timezone"],
+        "interval_minutes": row["interval_minutes"],
+        "response_minutes": row["response_minutes"],
+        "quiet_start": row["quiet_start"],
+        "quiet_end": row["quiet_end"],
+        "exercises": [
+            {"id": e["slug"], "name": e["name"], "min": e["min_reps"],
+             "max": None if pos == len(rows) - 1 else e["max_reps"]}
+            for pos, e in enumerate(rows)
+        ],
+    }
 
 
-def load_state() -> dict:
-    s = load_json(STATE_PATH, {})
-    s.setdefault("bonus", 0)
-    s.setdefault("history", [])
-    s.setdefault("current", None)
-    s.setdefault("created_at", iso(now_utc()))
-    return s
+def slugify(name: str, db: sqlite3.Connection) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "exercise"
+    slug, i = base, 2
+    while db.execute("SELECT 1 FROM exercises WHERE slug=?", (slug,)).fetchone():
+        slug = f"{base}-{i}"
+        i += 1
+    return slug
 
 
-def load_tally() -> dict:
-    t = load_json(TALLY_PATH, DEFAULT_TALLY)
-    t.setdefault("totals", {})
-    t.setdefault("sets_done", 0)
-    t.setdefault("sets_missed", 0)
-    return t
+def save_settings(db: sqlite3.Connection, cfg: dict) -> dict:
+    stamp = iso(now_utc())
+    db.execute(
+        "UPDATE settings SET timezone=?, interval_minutes=?, response_minutes=?, quiet_start=?, quiet_end=? WHERE id=1",
+        (cfg["timezone"], cfg["interval_minutes"], cfg["response_minutes"],
+         cfg["quiet_start"], cfg["quiet_end"]),
+    )
+    keep: set[str] = set()
+    for pos, ex in enumerate(cfg["exercises"]):
+        slug = (ex.get("id") or "").strip()
+        row = db.execute("SELECT id FROM exercises WHERE slug=?", (slug,)).fetchone() if slug else None
+        if row:
+            db.execute(
+                "UPDATE exercises SET name=?, min_reps=?, max_reps=?, position=?, active=1, retired_at=NULL WHERE id=?",
+                (ex["name"], ex["min"], ex["max"], pos, row["id"]),
+            )
+            keep.add(slug)
+        else:
+            slug = slugify(ex["name"], db)
+            db.execute(
+                "INSERT INTO exercises (slug, name, min_reps, max_reps, position, active, created_at)"
+                " VALUES (?, ?, ?, ?, ?, 1, ?)",
+                (slug, ex["name"], ex["min"], ex["max"], pos, stamp),
+            )
+            keep.add(slug)
+    for row in db.execute("SELECT slug FROM exercises WHERE active=1").fetchall():
+        if row["slug"] not in keep:
+            db.execute("UPDATE exercises SET active=0, retired_at=? WHERE slug=?", (stamp, row["slug"]))
+    db.commit()
+    return load_settings(db)
+
+
+# ---------------------------------------------------------------- state
+def load_state(db: sqlite3.Connection) -> dict:
+    row = db.execute("SELECT * FROM app_state WHERE id=1").fetchone()
+    return {"bonus": row["bonus"], "next_set_at": row["next_set_at"], "created_at": row["created_at"]}
+
+
+def save_state(db: sqlite3.Connection, state: dict) -> None:
+    db.execute("UPDATE app_state SET bonus=?, next_set_at=? WHERE id=1",
+               (state["bonus"], state["next_set_at"]))
+
+
+def last_round(db: sqlite3.Connection) -> dict | None:
+    row = db.execute("SELECT * FROM rounds ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    items = db.execute("SELECT * FROM round_items WHERE round_id=? ORDER BY id", (row["id"],)).fetchall()
+    return {
+        "id": row["round_key"],
+        "db_id": row["id"],
+        "sent_at": row["sent_at"],
+        "deadline": row["deadline_at"],
+        "status": row["status"],
+        "confirmed_at": row["resolved_at"],
+        "bonus_applied": row["bonus_applied"],
+        "exercises": [{"id": i["exercise_slug"], "name": i["exercise_name"], "reps": i["reps"]}
+                      for i in items],
+    }
 
 
 # ---------------------------------------------------------------- schedule
@@ -140,23 +267,17 @@ def in_active_window(dt: datetime, settings: dict) -> bool:
 
 
 def clamp_to_active(dt: datetime, settings: dict) -> datetime:
-    """Push dt forward to the end of the quiet window if it lands inside it."""
     if in_active_window(dt, settings):
         return dt
     tz = tz_of(settings)
     local = dt.astimezone(tz)
     qs = _hm_seconds(settings.get("quiet_start", "00:00"))
     qe = _hm_seconds(settings.get("quiet_end", "07:00"))
-    target_secs = qe
-    candidate = local.replace(hour=target_secs // 3600, minute=(target_secs // 60) % 60,
-                              second=0, microsecond=0)
+    candidate = local.replace(hour=qe // 3600, minute=(qe // 60) % 60, second=0, microsecond=0)
     if qs < qe:
         if local.hour * 3600 + local.minute * 60 >= qe:
             candidate += timedelta(days=1)
-        else:
-            # inside the window: later today
-            pass
-    else:  # window wraps midnight (e.g. 22:00 -> 07:00)
+    else:
         if local.hour * 3600 + local.minute * 60 >= qs:
             candidate += timedelta(days=1)
     return candidate.astimezone(timezone.utc)
@@ -164,12 +285,7 @@ def clamp_to_active(dt: datetime, settings: dict) -> datetime:
 
 # ---------------------------------------------------------------- stack math
 def compose(settings: dict, bonus: int) -> list[dict]:
-    """Turn (minimums, bonus) into the concrete set for right now.
-
-    Exercise 0 always runs and absorbs the bonus up to its cap. When it is at
-    its cap the next exercise joins at its own minimum, absorbing whatever is
-    left over. The last exercise has no overflow target, so it is uncapped.
-    """
+    """Turn (minimums, bonus) into the concrete set for right now."""
     exercises = settings["exercises"]
     out: list[dict] = []
     carry = max(0, int(bonus))
@@ -190,208 +306,320 @@ def compose(settings: dict, bonus: int) -> list[dict]:
 
 
 def format_set(rows: list[dict]) -> str:
-    lines = ["Time to lock in:"]
-    for row in rows:
-        lines.append(f"{row['name']} {row['reps']}")
-    return "\n".join(lines)
+    return "\n".join(["Time to lock in:"] + [f"{r['name']} {r['reps']}" for r in rows])
 
 
 # ---------------------------------------------------------------- actions
-def _start_set(settings: dict, state: dict, now: datetime) -> dict:
-    rows = compose(settings, state.get("bonus", 0))
+def open_round(db: sqlite3.Connection, settings: dict, state: dict, now: datetime) -> dict:
+    rows = compose(settings, state["bonus"])
     resp = int(settings.get("response_minutes", 10))
-    current = {
-        "id": uuid.uuid4().hex[:12],
-        "sent_at": iso(now),
-        "deadline": iso(now + timedelta(minutes=resp)),
-        "exercises": rows,
-        "status": "pending",
-        "bonus_applied": state.get("bonus", 0),
-    }
-    state["current"] = current
-    # the interval clock does not run while a round is open; it starts when the
-    # round is answered or abandoned (see _close_round)
-    state["next_set_at"] = None
-    return current
+    tz = tz_of(settings)
+    cur = db.execute(
+        "INSERT INTO rounds (round_key, sent_at, sent_local_date, deadline_at, status, bonus_applied, target_reps)"
+        " VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+        (uuid.uuid4().hex[:12], iso(now), now.astimezone(tz).date().isoformat(),
+         iso(now + timedelta(minutes=resp)), state["bonus"], sum(r["reps"] for r in rows)),
+    )
+    for r in rows:
+        db.execute("INSERT INTO round_items (round_id, exercise_slug, exercise_name, reps) VALUES (?, ?, ?, ?)",
+                   (cur.lastrowid, r["id"], r["name"], r["reps"]))
+    state["next_set_at"] = None   # the interval clock only runs between rounds
+    save_state(db, state)
+    return last_round(db)
 
 
-def _close_round(state: dict, settings: dict, now: datetime) -> None:
-    """Start the interval clock that leads to the next set."""
+def close_round(db: sqlite3.Connection, settings: dict, state: dict, now: datetime) -> None:
     interval = int(settings.get("interval_minutes", 90))
     state["next_set_at"] = iso(clamp_to_active(now + timedelta(minutes=interval), settings))
+    save_state(db, state)
 
 
 def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
-    settings = load_settings()
-    with lock():
-        state = load_state()
-        now = now_utc()
-        dirty = False
+    db = connect()
+    init_db(db)
+    settings = load_settings(db)
+    state = load_state(db)
+    now = now_utc()
+    message = None
 
-        cur = state.get("current")
-        open_round = bool(cur and cur.get("status") == "pending")
-        if open_round and now >= parse(cur["deadline"]):
-            cur["status"] = "missed"
-            cur["missed_at"] = iso(now)
-            state["bonus"] = int(state.get("bonus", 0)) + 1
-            state["history"].append({"set": cur["id"], "status": "missed",
-                                     "at": iso(now), "exercises": cur["exercises"]})
-            tally = load_tally()
-            tally["sets_missed"] = int(tally.get("sets_missed", 0)) + 1
-            if not dry_run:
-                save_json(TALLY_PATH, tally)
-            _close_round(state, settings, now)
-            open_round = False
-            dirty = True
+    cur = last_round(db)
+    round_open = bool(cur and cur["status"] == "pending")
+    if round_open and now >= parse(cur["deadline"]):
+        if not dry_run:
+            db.execute("UPDATE rounds SET status='missed', resolved_at=? WHERE id=?",
+                       (iso(now), cur["db_id"]))
+            state["bonus"] = int(state["bonus"]) + 1
+            close_round(db, settings, state, now)
+            db.commit()
+        round_open = False
 
-        message = None
-        next_at = state.get("next_set_at")
-        due = (not open_round) and next_at is not None and now >= parse(next_at)
-        if due and (force or in_active_window(now, settings)):
-            current = _start_set(settings, state, now)
-            dirty = True
-            message = format_set(current["exercises"])
+    next_at = state["next_set_at"]
+    due = (not round_open) and next_at is not None and now >= parse(next_at)
+    if due and (force or in_active_window(now, settings)):
+        message = format_set(compose(settings, state["bonus"]))
+        if not dry_run:
+            open_round(db, settings, state, now)
+            db.commit()
 
-        if dirty and not dry_run:
-            save_json(STATE_PATH, state)
-        if message:
-            print(message)
+    db.close()
+    if message:
+        print(message)
     return 0
 
 
 def cmd_confirm(source: str = "") -> int:
-    settings = load_settings()
-    with lock():
-        state = load_state()
-        cur = state.get("current")
-        if not cur or cur.get("status") not in ("pending", "missed"):
-            return 3
-        now = now_utc()
-        late = now > parse(cur["deadline"]) or cur.get("status") == "missed"
+    db = connect()
+    init_db(db)
+    settings = load_settings(db)
+    state = load_state(db)
+    cur = last_round(db)
+    if not cur or cur["status"] not in ("pending", "missed"):
+        db.close()
+        return 3
 
-        tally = load_tally()
-        if not tally.get("started_at"):
-            tally["started_at"] = iso(now)
-        for row in cur["exercises"]:
-            slot = tally["totals"].setdefault(row["id"], {"name": row["name"], "reps": 0})
-            slot["name"] = row["name"]
-            slot["reps"] = int(slot.get("reps", 0)) + int(row["reps"])
-        tally["sets_done"] = int(tally.get("sets_done", 0)) + 1
+    now = now_utc()
+    late = cur["status"] == "missed" or now > parse(cur["deadline"])
+    db.execute("UPDATE rounds SET status=?, resolved_at=?, source=? WHERE id=?",
+               ("late" if late else "done", iso(now), source, cur["db_id"]))
+    state["bonus"] = 2 if late else 0
+    close_round(db, settings, state, now)
+    db.commit()
 
-        state["bonus"] = 2 if late else 0
-        cur["status"] = "late" if late else "done"
-        cur["confirmed_at"] = iso(now)
-        cur["source"] = source
-        state["history"].append({"set": cur["id"], "status": cur["status"],
-                                 "at": iso(now), "exercises": cur["exercises"]})
-        _close_round(state, settings, now)
-        save_json(TALLY_PATH, tally)
-        save_json(STATE_PATH, state)
-
-    rows = ", ".join(f"{r['reps']} {r['name'].lower()}" for r in cur["exercises"])
-    if late:
-        receipt = (f"Late, but logged: {rows}.\n"
-                   f"Reset — next set is +2 push-ups.")
-    else:
-        receipt = f"Logged: {rows}. Back to base next set."
-    nxt = state.get("next_set_at")
-    if nxt:
-        local = parse(nxt).astimezone(tz_of(settings))
-        receipt += f" Next set {local.strftime('%H:%M')}."
+    receipt = _receipt(cur, late, state, settings)
+    db.close()
     print(receipt)
     return 0
 
 
+def _receipt(cur: dict, late: bool, state: dict, settings: dict) -> str:
+    rows = ", ".join(f"{r['reps']} {r['name'].lower()}" for r in cur["exercises"])
+    if late:
+        out = f"Late, but logged: {rows}.\nReset — next set is +2 push-ups."
+    else:
+        out = f"Logged: {rows}. Back to base next set."
+    if state.get("next_set_at"):
+        local = parse(state["next_set_at"]).astimezone(tz_of(settings))
+        out += f" Next set {local.strftime('%H:%M')}."
+    return out
+
+
 def cmd_reset(keep_tally: bool) -> int:
-    with lock():
-        state = {"bonus": 0, "current": None, "history": [],
-                 "created_at": iso(now_utc()), "next_set_at": iso(now_utc())}
-        save_json(STATE_PATH, state)
-        if not keep_tally:
-            save_json(TALLY_PATH, DEFAULT_TALLY)
+    db = connect()
+    init_db(db)
+    db.execute("DELETE FROM round_items")
+    db.execute("DELETE FROM rounds")
+    db.execute("UPDATE app_state SET bonus=0, next_set_at=? WHERE id=1", (iso(now_utc()),))
+    if not keep_tally:
+        db.execute("DELETE FROM opening_balance")
+    db.commit()
+    db.close()
     print("state reset" + (" (tally kept)" if keep_tally else " (tally cleared)"))
     return 0
 
 
-# ---------------------------------------------------------------- view model
+# ---------------------------------------------------------------- reporting
+def totals(db: sqlite3.Connection) -> list[dict]:
+    """Lifetime reps per exercise slug, including removed exercises and legacy balances."""
+    acc: dict[str, dict] = {}
+    for row in db.execute("SELECT * FROM opening_balance").fetchall():
+        acc[row["exercise_slug"]] = {"id": row["exercise_slug"], "name": row["exercise_name"],
+                                     "reps": int(row["reps"]), "order": -50, "active": False}
+    for row in db.execute(
+        "SELECT ri.exercise_slug slug, ri.exercise_name name, ri.reps reps"
+        " FROM round_items ri JOIN rounds r ON r.id = ri.round_id"
+        " WHERE r.status IN ('done','late') ORDER BY r.id"
+    ).fetchall():
+        slot = acc.setdefault(row["slug"], {"id": row["slug"], "name": row["name"],
+                                            "reps": 0, "order": 900, "active": False})
+        slot["reps"] += int(row["reps"])
+        slot["name"] = row["name"]
+
+    for pos, row in enumerate(db.execute("SELECT * FROM exercises WHERE active=1 ORDER BY position").fetchall()):
+        slot = acc.setdefault(row["slug"], {"id": row["slug"], "name": row["name"],
+                                            "reps": 0, "order": pos, "active": False})
+        slot.update({"name": row["name"], "order": pos, "active": True})
+    return sorted(acc.values(), key=lambda s: (s["order"], s["name"]))
+
+
+def build_calendar(db: sqlite3.Connection, settings: dict, now: datetime) -> dict:
+    tz = tz_of(settings)
+    days: dict[str, dict] = {}
+    for row in db.execute(
+        "SELECT sent_local_date d, COUNT(*) rounds,"
+        " SUM(CASE WHEN status IN ('done','late') THEN 1 ELSE 0 END) done,"
+        " SUM(CASE WHEN status IN ('done','late') THEN target_reps ELSE 0 END) reps"
+        " FROM rounds GROUP BY sent_local_date"
+    ).fetchall():
+        days[row["d"]] = {"rounds": row["rounds"], "done": row["done"] or 0,
+                          "reps": row["reps"] or 0, "by_ex": {}}
+    for row in db.execute(
+        "SELECT r.sent_local_date d, ri.exercise_slug slug, SUM(ri.reps) reps"
+        " FROM round_items ri JOIN rounds r ON r.id = ri.round_id"
+        " WHERE r.status IN ('done','late') GROUP BY d, slug"
+    ).fetchall():
+        slot = days.setdefault(row["d"], {"rounds": 0, "done": 0, "reps": 0, "by_ex": {}})
+        slot["by_ex"][row["slug"]] = int(row["reps"])
+    for slot in days.values():
+        slot["ratio"] = (slot["done"] / slot["rounds"]) if slot["rounds"] else 0.0
+    today = now.astimezone(tz).date()
+    return {"days": days,
+            "today": today.isoformat(),
+            "start": (today - timedelta(days=364)).isoformat(),
+            "max_reps": max([s["reps"] for s in days.values()], default=0)}
+
+
 def view() -> dict:
-    settings = load_settings()
-    state = load_state()
-    tally = load_tally()
+    db = connect()
+    init_db(db)
+    settings = load_settings(db)
+    state = load_state(db)
     now = now_utc()
     tz = tz_of(settings)
 
-    totals = []
-    totals.append({"id": "_summary", "name": "Total reps", "reps":
-                   sum(int(v.get("reps", 0)) for v in tally["totals"].values())})
-    seen = set()
-    for ex in settings["exercises"]:
-        slot = tally["totals"].get(ex["id"], {})
-        totals.append({"id": ex["id"], "name": ex.get("name", ex["id"]),
-                       "reps": int(slot.get("reps", 0)), "active": True})
-        seen.add(ex["id"])
-    # exercises removed from the config but already on the board stay in the tally
-    for ex_id, slot in tally["totals"].items():
-        if ex_id in seen:
-            continue
-        totals.append({"id": ex_id, "name": slot.get("name", ex_id),
-                       "reps": int(slot.get("reps", 0)), "active": False})
+    total_rows = totals(db)
+    summary = sum(t["reps"] for t in total_rows)
+    sets_done = db.execute("SELECT COUNT(*) c FROM rounds WHERE status IN ('done','late')").fetchone()["c"]
+    sets_missed = db.execute("SELECT COUNT(*) c FROM rounds WHERE status='missed'").fetchone()["c"]
+    first = db.execute("SELECT MIN(resolved_at) t FROM rounds WHERE status IN ('done','late')").fetchone()["t"]
 
-    cur = state.get("current")
-    round_open = bool(cur and cur.get("status") == "pending")
+    cur = last_round(db)
     current = None
     if cur:
         current = dict(cur)
         current["seconds_left"] = max(0, int((parse(cur["deadline"]) - now).total_seconds()))
         current["local_sent"] = parse(cur["sent_at"]).astimezone(tz).strftime("%H:%M")
 
-    nxt = state.get("next_set_at")
+    recent = []
+    rows = db.execute(
+        "SELECT r.*, GROUP_CONCAT(ri.reps || '×' || ri.exercise_name, '|') AS items"
+        " FROM rounds r LEFT JOIN round_items ri ON ri.round_id = r.id"
+        " GROUP BY r.id ORDER BY r.id DESC LIMIT 12"
+    ).fetchall()
+    for row in rows:
+        items = []
+        if row["items"]:
+            for chunk in row["items"].split("|"):
+                reps, _, name = chunk.partition("×")
+                items.append({"name": name, "reps": int(reps)})
+        sent = parse(row["sent_at"]).astimezone(tz)
+        recent.append({"set": row["round_key"], "status": row["status"],
+                       "at": row["resolved_at"] or row["sent_at"],
+                       "local": sent.strftime("%H:%M"), "day": sent.strftime("%d %b"),
+                       "exercises": items})
+
     next_set = None
-    if nxt:
-        when = parse(nxt)
+    if state["next_set_at"]:
+        when = parse(state["next_set_at"])
         eff = clamp_to_active(when, settings)
-        next_set = {"at": iso(eff),
-                    "local": eff.astimezone(tz).strftime("%H:%M"),
-                    "deferred": eff != when,
-                    "scheduled": iso(when),
+        next_set = {"at": iso(eff), "local": eff.astimezone(tz).strftime("%H:%M"),
+                    "deferred": eff != when, "scheduled": iso(when),
                     "seconds_left": max(0, int((eff - now).total_seconds()))}
 
-    recent = []
-    for h in state.get("history", [])[-12:]:
-        item = dict(h)
-        try:
-            item["local"] = parse(h["at"]).astimezone(tz).strftime("%H:%M")
-        except Exception:
-            item["local"] = ""
-        recent.append(item)
-
-    preview = compose(settings, int(state.get("bonus", 0)))
-    return {
+    out = {
         "now": iso(now),
         "now_local": now.astimezone(tz).strftime("%H:%M:%S"),
         "timezone": settings.get("timezone"),
         "settings": settings,
-        "state": {k: v for k, v in state.items() if k != "history"},
+        "state": {"bonus": state["bonus"], "next_set_at": state["next_set_at"],
+                  "created_at": state["created_at"]},
         "recent": recent,
-        "tally": tally,
-        "totals": totals,
+        "tally": {"started_at": first, "sets_done": sets_done, "sets_missed": sets_missed,
+                  "totals": {t["id"]: {"name": t["name"], "reps": t["reps"]} for t in total_rows}},
+        "totals": [{"id": "_summary", "name": "Total reps", "reps": summary}] + total_rows,
         "current": current,
-        "round_open": round_open,
+        "round_open": bool(cur and cur["status"] == "pending"),
         "next_set": next_set,
-        "preview": preview,
+        "preview": compose(settings, state["bonus"]),
         "quiet_now": not in_active_window(now, settings),
+        "calendar": build_calendar(db, settings, now),
     }
+    db.close()
+    return out
 
 
 def cmd_status() -> int:
     v = view()
     print(f"local now      {v['now_local']} ({v['timezone']})")
-    print(f"bonus          +{v['state'].get('bonus', 0)}")
+    print(f"bonus          +{v['state']['bonus']}")
     print(f"next set       {v['next_set']['local'] if v['next_set'] else '-'}")
     print(f"current        {(v['current'] or {}).get('status', 'none')}"
           f" {v['current']['seconds_left'] if v['current'] else ''}")
     print("preview        " + (", ".join(f"{r['name']} {r['reps']}" for r in v["preview"]) or "-"))
     print("totals         " + ", ".join(f"{t['name']}: {t['reps']}" for t in v["totals"][1:]))
+    return 0
+
+
+def cmd_report() -> int:
+    for day, slot in sorted(view()["calendar"]["days"].items()):
+        parts = ", ".join(f"{k} {n}" for k, n in slot["by_ex"].items())
+        print(f"{day}  {slot['done']}/{slot['rounds']} rounds  {slot['reps']} reps  {parts}")
+    return 0
+
+
+# ---------------------------------------------------------------- migration
+def cmd_migrate() -> int:
+    db = connect()
+    init_db(db)
+    if db.execute("SELECT COUNT(*) c FROM rounds").fetchone()["c"]:
+        print("already migrated (rounds exist)")
+        db.close()
+        return 0
+
+    settings = json.loads(LEGACY_SETTINGS.read_text()) if LEGACY_SETTINGS.exists() else DEFAULT_SETTINGS
+    state = json.loads(LEGACY_STATE.read_text()) if LEGACY_STATE.exists() else {}
+    tally = json.loads(LEGACY_TALLY.read_text()) if LEGACY_TALLY.exists() else {}
+    save_settings(db, settings)
+
+    if state.get("bonus"):
+        db.execute("UPDATE app_state SET bonus=?, next_set_at=? WHERE id=1",
+                   (int(state["bonus"]), state.get("next_set_at")))
+        db.commit()
+    elif state.get("next_set_at"):
+        db.execute("UPDATE app_state SET next_set_at=? WHERE id=1", (state["next_set_at"],))
+        db.commit()
+
+    tz = tz_of(settings)
+    # the legacy history can list the same set twice (missed, then confirmed late);
+    # the later entry wins
+    merged: dict[str, dict] = {}
+    for h in list(state.get("history", [])) + ([state["current"]] if state.get("current") else []):
+        if not (h.get("exercises") or []):
+            continue
+        merged[h.get("set") or uuid.uuid4().hex[:12]] = h
+
+    imported = 0
+    for key, h in merged.items():
+        if db.execute("SELECT 1 FROM rounds WHERE round_key=?", (key,)).fetchone():
+            continue
+        rows = h["exercises"]
+        at = h.get("at") or h.get("sent_at") or iso(now_utc())
+        sent = parse(at)
+        cur = db.execute(
+            "INSERT INTO rounds (round_key, sent_at, sent_local_date, deadline_at, resolved_at,"
+            " status, target_reps) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (key, iso(sent), sent.astimezone(tz).date().isoformat(),
+             iso(sent + timedelta(minutes=10)), at, h.get("status", "missed"),
+             sum(int(r["reps"]) for r in rows)))
+        for r in rows:
+            db.execute("INSERT INTO round_items (round_id, exercise_slug, exercise_name, reps)"
+                       " VALUES (?, ?, ?, ?)", (cur.lastrowid, r["id"], r["name"], r["reps"]))
+        imported += 1
+
+    done_reps: dict[str, int] = {}
+    for row in db.execute(
+            "SELECT ri.exercise_slug slug, SUM(ri.reps) reps FROM round_items ri"
+            " JOIN rounds r ON r.id = ri.round_id WHERE r.status IN ('done','late')"
+            " GROUP BY ri.exercise_slug").fetchall():
+        done_reps[row["slug"]] = int(row["reps"])
+    for slug, slot in (tally.get("totals") or {}).items():
+        gap = int(slot.get("reps", 0)) - done_reps.get(slug, 0)
+        if gap > 0:
+            db.execute("INSERT OR REPLACE INTO opening_balance (exercise_slug, exercise_name, reps, recorded_at)"
+                       " VALUES (?, ?, ?, ?)", (slug, slot.get("name", slug), gap, iso(now_utc())))
+
+    db.commit()
+    db.close()
+    print(f"migrated {imported} rounds; opening balances from legacy tally")
     return 0
 
 
@@ -401,10 +629,7 @@ def main(argv: list[str]) -> int:
     if cmd == "tick":
         return cmd_tick(dry_run="--dry-run" in args, force="--force" in args)
     if cmd == "confirm":
-        source = ""
-        if "--source" in args:
-            source = args[args.index("--source") + 1]
-        return cmd_confirm(source)
+        return cmd_confirm(args[args.index("--source") + 1] if "--source" in args else "")
     if cmd == "reset":
         return cmd_reset(keep_tally="--keep-tally" in args)
     if cmd == "state":
@@ -412,11 +637,16 @@ def main(argv: list[str]) -> int:
         return 0
     if cmd == "status":
         return cmd_status()
-    if cmd == "compose":  # debug helper: compose --bonus 11
-        bonus = 0
-        if "--bonus" in args:
-            bonus = int(args[args.index("--bonus") + 1])
-        print(format_set(compose(load_settings(), bonus)))
+    if cmd == "report":
+        return cmd_report()
+    if cmd == "migrate":
+        return cmd_migrate()
+    if cmd == "compose":
+        bonus = int(args[args.index("--bonus") + 1]) if "--bonus" in args else 0
+        db = connect()
+        init_db(db)
+        print(format_set(compose(load_settings(db), bonus)))
+        db.close()
         return 0
     print(__doc__, file=sys.stderr)
     return 2

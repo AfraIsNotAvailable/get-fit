@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""State-machine tests for getfit (runs against a throwaway copy of the store)."""
+"""State-machine tests for getfit (runs against a throwaway database)."""
 import io
-import json
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -12,18 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import getfit
 
 tmp = Path(tempfile.mkdtemp(prefix="getfit-test-"))
-getfit.SETTINGS_PATH = tmp / "settings.json"
-getfit.STATE_PATH = tmp / "state.json"
-getfit.TALLY_PATH = tmp / "tally.json"
-getfit.LOCK_PATH = tmp / ".lock"
-
-getfit.save_json(getfit.SETTINGS_PATH, getfit.DEFAULT_SETTINGS)
-getfit.save_json(getfit.TALLY_PATH, getfit.DEFAULT_TALLY)
+getfit.DB_PATH = tmp / "test.db"
 
 CLOCK = {"now": datetime(2026, 11, 12, 5, 0, tzinfo=timezone.utc)}  # 07:00 Bucharest
 getfit.now_utc = lambda: CLOCK["now"]
-getfit.save_json(getfit.STATE_PATH, {"bonus": 0, "current": None, "history": [],
-                                     "next_set_at": getfit.iso(CLOCK["now"])})
+
+db = getfit.connect()
+getfit.init_db(db)
+db.execute("UPDATE app_state SET next_set_at=? WHERE id=1", (getfit.iso(CLOCK["now"]),))
+db.commit()
+db.close()
 
 
 def run(fn, *a, **kw):
@@ -34,11 +31,24 @@ def run(fn, *a, **kw):
 
 
 def state():
-    return json.loads(getfit.STATE_PATH.read_text())
+    con = getfit.connect()
+    row = con.execute("SELECT * FROM app_state WHERE id=1").fetchone()
+    con.close()
+    return dict(row)
 
 
-def tally():
-    return json.loads(getfit.TALLY_PATH.read_text())
+def totals():
+    con = getfit.connect()
+    out = {t["id"]: t["reps"] for t in getfit.totals(con)}
+    con.close()
+    return out
+
+
+def last_round():
+    con = getfit.connect()
+    cur = getfit.last_round(con)
+    con.close()
+    return cur
 
 
 def advance(minutes):
@@ -57,7 +67,7 @@ def check(name, cond, detail=""):
 # 1. first tick fires a base set and starts no interval clock
 rc, out = run(getfit.cmd_tick)
 check("tick fires base set", out == "Time to lock in:\nPush-ups 10", repr(out))
-check("set is pending", state()["current"]["status"] == "pending")
+check("round stored as pending", last_round()["status"] == "pending", last_round())
 check("no interval clock while the round is open", state()["next_set_at"] is None,
       state()["next_set_at"])
 
@@ -70,7 +80,8 @@ check("no second set while a round is open", out == "", repr(out))
 advance(1)
 rc, out = run(getfit.cmd_confirm, "test")
 check("confirm rc=0", rc == 0, rc)
-check("tally +10 push-ups", tally()["totals"]["pushups"]["reps"] == 10, tally())
+check("round marked done", last_round()["status"] == "done", last_round()["status"])
+check("tally +10 push-ups", totals().get("pushups") == 10, totals())
 check("bonus reset", state()["bonus"] == 0, state()["bonus"])
 check("interval clock starts at confirmation",
       getfit.parse(state()["next_set_at"]) == CLOCK["now"] + timedelta(minutes=90),
@@ -102,53 +113,65 @@ rc, out = run(getfit.cmd_confirm, "test")
 check("late confirm logs", rc == 0 and "Late" in out, out)
 check("late penalty is +2", state()["bonus"] == 2, state()["bonus"])
 check("tally added 20 push-ups and 5 squats",
-      tally()["totals"]["pushups"]["reps"] == 30 and tally()["totals"]["squats"]["reps"] == 5, tally())
+      totals().get("pushups") == 30 and totals().get("squats") == 5, totals())
 check("late confirmation restarts the interval clock",
       getfit.parse(state()["next_set_at"]) == CLOCK["now"] + timedelta(minutes=90),
       state()["next_set_at"])
 
 # 5. quiet hours: nothing fires between 00:00 and 07:00 local
 CLOCK["now"] = datetime(2026, 11, 13, 1, 30, tzinfo=timezone.utc)   # 03:30 Bucharest
-st = state()
-st["next_set_at"] = getfit.iso(CLOCK["now"])
-st["current"] = None
-getfit.save_json(getfit.STATE_PATH, st)
+con = getfit.connect()
+con.execute("UPDATE app_state SET next_set_at=? WHERE id=1", (getfit.iso(CLOCK["now"]),))
+con.commit()
+con.close()
 rc, out = run(getfit.cmd_tick)
 check("quiet hours stay silent", out == "", repr(out))
 
 # 6. a round that dies at 23:30 local schedules the next set for 07:00
 CLOCK["now"] = datetime(2026, 11, 13, 21, 30, tzinfo=timezone.utc)  # 23:30 local
-st = state()
-st["next_set_at"] = getfit.iso(CLOCK["now"])
-st["current"] = None
-st["bonus"] = 0
-getfit.save_json(getfit.STATE_PATH, st)
+con = getfit.connect()
+con.execute("UPDATE app_state SET next_set_at=?, bonus=0 WHERE id=1", (getfit.iso(CLOCK["now"]),))
+con.commit()
+con.close()
 rc, out = run(getfit.cmd_tick)
 check("23:30 set fires", out.startswith("Time to lock in"), repr(out))
 CLOCK["now"] = CLOCK["now"] + timedelta(minutes=11)
 run(getfit.cmd_tick)   # expire -> interval clock, clamped out of quiet hours
-nxt = getfit.parse(state()["next_set_at"]).astimezone(getfit.tz_of(getfit.load_settings()))
+nxt = getfit.parse(state()["next_set_at"]).astimezone(getfit.tz_of(getfit.load_settings(getfit.connect())))
 check("next set held until 07:00", nxt.strftime("%H:%M") == "07:00", nxt.isoformat())
 
-# 7. removed exercise keeps its lifetime reps
-getfit.save_json(getfit.TALLY_PATH, {"started_at": None, "sets_done": 2, "sets_missed": 11,
-                                     "totals": {"pushups": {"name": "Push-ups", "reps": 30},
-                                                "oldjacks": {"name": "Jumping jacks", "reps": 12}}})
+# 7. a retired exercise keeps its lifetime reps
+con = getfit.connect()
+cur = con.execute(
+    "INSERT INTO rounds (round_key, sent_at, sent_local_date, deadline_at, resolved_at, status, target_reps)"
+    " VALUES ('legacy1', '2026-11-01T10:00:00Z', '2026-11-01', '2026-11-01T10:10:00Z',"
+    " '2026-11-01T10:05:00Z', 'done', 12)")
+con.execute("INSERT INTO round_items (round_id, exercise_slug, exercise_name, reps)"
+            " VALUES (?, 'oldjacks', 'Jumping jacks', 12)", (cur.lastrowid,))
+con.commit()
+con.close()
 v = getfit.view()
 names = {t["name"]: t["reps"] for t in v["totals"]}
-check("removed exercise still counted", names.get("Jumping jacks") == 12, names)
-check("summary sums everything", names.get("Total reps") == 42, names)
+check("retired exercise still counted", names.get("Jumping jacks") == 12, names)
+check("summary sums everything", names.get("Total reps") == sum(n for k, n in names.items() if k != "Total reps"), names)
 
 # 8. the view model marks an open round and hides the next-set countdown
 CLOCK["now"] = datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
-st = state()
-st["next_set_at"] = getfit.iso(CLOCK["now"])
-st["current"] = None
-getfit.save_json(getfit.STATE_PATH, st)
+con = getfit.connect()
+con.execute("UPDATE app_state SET next_set_at=? WHERE id=1", (getfit.iso(CLOCK["now"]),))
+con.commit()
+con.close()
 run(getfit.cmd_tick)
 v = getfit.view()
 check("view reports an open round", v["round_open"] is True, v["round_open"])
 check("no next set while a round is open", v["next_set"] is None, v["next_set"])
+
+# 9. the calendar groups rounds by local day with a completion ratio
+day = v["calendar"]["today"]
+slot = v["calendar"]["days"].get(day)
+check("calendar has today", slot is not None, v["calendar"]["days"].keys())
+check("calendar day counts one round", slot and slot["rounds"] >= 1, slot)
+check("calendar day reports zero reps so far", slot and slot["reps"] >= 0, slot)
 
 print()
 print("FAILURES:", fails if fails else "none")

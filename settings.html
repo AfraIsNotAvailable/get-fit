@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>Get fit — settings</title>
+<style>
+  :root{
+    --paper:#faf9f6; --ink:#191917; --muted:#5f5d57; --faint:#7d7a72;
+    --line:#dcd9d2; --line2:#b9b5ab; --accent:#8d2f1b; --field:#fffefb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#141413; --ink:#e9e6df; --muted:#a8a49a; --faint:#89857c;
+      --line:#2d2c28; --line2:#43413b; --accent:#d07a63; --field:#1a1a18;
+    }
+  }
+  *{box-sizing:border-box; border-radius:0}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:38px 26px 96px}
+
+  .masthead{
+    display:flex; justify-content:space-between; align-items:baseline; gap:16px;
+    padding-bottom:10px; border-bottom:1px solid var(--line2);
+    font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted);
+  }
+  .masthead .left{display:flex; align-items:baseline; gap:18px}
+  .brand{color:var(--ink); font-weight:600; letter-spacing:.17em; text-decoration:none}
+  .navlink{color:var(--faint); text-decoration:none; border-bottom:1px solid transparent}
+  .navlink:hover{color:var(--ink); border-bottom-color:var(--line2)}
+  .stamp{font-variant-numeric:tabular-nums; letter-spacing:.07em}
+
+  h1{font-size:32px; font-weight:500; letter-spacing:-.02em; margin:36px 0 8px}
+  .lede{margin:0 0 34px; color:var(--muted); max-width:58ch}
+  .label{font-size:10.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--faint); font-weight:600}
+
+  .block{margin:0 0 36px}
+  .block-head{display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding-bottom:9px; border-bottom:1px solid var(--line2)}
+
+  .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:16px; padding:16px 0 4px}
+  .f label{display:block; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:5px}
+  .f.wide{grid-column:span 2}
+  input{
+    width:100%; background:var(--field); color:var(--ink);
+    border:1px solid var(--line2); padding:7px 9px; font:inherit; font-variant-numeric:tabular-nums;
+  }
+  input:focus{outline:none; border-color:var(--ink)}
+  input:disabled{color:var(--faint); background:transparent; border-style:dashed}
+
+  .ex-head-row, .ex{display:grid; grid-template-columns:22px 1fr 78px 78px 92px; gap:12px; align-items:center}
+  .ex-head-row{padding:24px 0 6px; color:var(--faint); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:600}
+  .ex{padding:9px 0; border-top:1px solid var(--line)}
+  .idx{color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums}
+  .clab{display:none}
+  .tools{display:flex; gap:6px; justify-content:flex-end}
+  .icon{
+    background:transparent; border:1px solid var(--line2); color:var(--muted);
+    width:26px; height:26px; font-size:12px; line-height:1; cursor:pointer; padding:0;
+  }
+  .icon:hover:not(:disabled){color:var(--ink); border-color:var(--ink)}
+  .icon:disabled{opacity:.28; cursor:default}
+  .addrow{border-top:1px solid var(--line); padding:10px 0}
+  .link{
+    background:none; border:none; padding:0; font:inherit; font-size:13.5px;
+    color:var(--muted); cursor:pointer; border-bottom:1px solid var(--line2);
+  }
+  .link:hover{color:var(--ink); border-color:var(--ink)}
+
+  .btn{
+    background:var(--ink); color:var(--paper); border:1px solid var(--ink);
+    padding:9px 16px; font:inherit; font-size:13.5px; cursor:pointer;
+  }
+  .btn:hover{opacity:.85}
+  .btn.ghost{background:transparent; color:var(--ink); border-color:var(--line2)}
+  .btn.ghost:hover{border-color:var(--ink); opacity:1}
+  button:focus-visible, input:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+  .actions{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:22px}
+  .msg{font-size:13px; color:var(--muted); margin-left:auto}
+  .msg.ok{color:var(--ink)}
+  .msg.err{color:var(--accent)}
+  .note{color:var(--faint); font-size:12.5px; line-height:1.7; margin:20px 0 0; max-width:62ch}
+
+  @media (max-width:640px){
+    .stamp{display:none}
+    .ex-head-row{display:none}
+    .ex{grid-template-columns:22px 1fr 1fr; row-gap:12px; padding:14px 0;
+        grid-template-areas:"i name name" ". min max" ". tools tools"}
+    .ex .idx{grid-area:i; align-self:end; padding-bottom:8px}
+    .ex .cellname{grid-area:name}
+    .ex .fmin{grid-area:min}
+    .ex .fmax{grid-area:max}
+    .ex .tools{grid-area:tools; justify-content:flex-start}
+    .clab{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:4px}
+    .f.wide{grid-column:span 1}
+    .msg{margin-left:0; flex-basis:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <span class="left">
+      <a class="brand" href="/">Get fit</a>
+      <a class="navlink" href="/">Dashboard</a>
+    </span>
+    <span class="stamp" id="stamp"></span>
+  </div>
+
+  <h1>Settings</h1>
+  <p class="lede">Saved to the local database the scheduler reads on every tick. Changing minimums affects the next set, not the one already on the clock.</p>
+
+  <section class="block">
+    <div class="block-head">
+      <span class="label">Schedule</span>
+      <span class="label">local time</span>
+    </div>
+    <div class="fields">
+      <div class="f"><label>Interval, min</label><input type="number" id="interval" min="1" max="1440"></div>
+      <div class="f"><label>Answer within, min</label><input type="number" id="response" min="1" max="240"></div>
+      <div class="f"><label>Quiet from</label><input type="text" id="quietStart" inputmode="numeric" placeholder="23:00"></div>
+      <div class="f"><label>Quiet until</label><input type="text" id="quietEnd" inputmode="numeric" placeholder="07:00"></div>
+      <div class="f wide"><label>Timezone</label><input type="text" id="tz" placeholder="Europe/Bucharest"></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <span class="label">Exercises</span>
+      <span class="label">overflow runs top to bottom</span>
+    </div>
+
+    <div class="ex-head-row">
+      <span>#</span><span>Exercise</span><span>Minimum</span><span>Max</span><span>Order</span>
+    </div>
+    <div id="exRows"></div>
+    <div class="addrow"><button class="link" id="addEx">Add exercise</button></div>
+
+    <div class="actions">
+      <button class="btn ghost" id="notifyBtn">Enable laptop alerts</button>
+      <button class="btn" id="save">Save settings</button>
+      <span class="msg" id="saveMsg"></span>
+    </div>
+    <p class="note">Reps past an exercise’s max land on the next one, which joins at its own minimum. The last exercise has no max — it takes whatever is left. Removing an exercise retires it: its reps stay in the lifetime tally.</p>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let rowsData = [];
+let dirty = false;
+
+const pad = (n) => String(n).padStart(2, '0');
+const normTime = (v) => {
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})$/);
+  return m ? `${pad(+m[1])}:${m[2]}` : String(v).trim();
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function load() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    const v = await r.json();
+    if (!dirty) fill(v.settings);
+  } catch (e) {
+    $('saveMsg').className = 'msg err';
+    $('saveMsg').textContent = 'Server offline';
+  }
+}
+
+function fill(s) {
+  $('interval').value = s.interval_minutes;
+  $('response').value = s.response_minutes;
+  $('quietStart').value = s.quiet_start;
+  $('quietEnd').value = s.quiet_end;
+  $('tz').value = s.timezone;
+  rowsData = s.exercises.map(e => ({ ...e }));
+  renderEx();
+}
+
+function renderEx() {
+  $('exRows').innerHTML = rowsData.map((raw, i) => {
+    const e = { ...raw, isLast: i === rowsData.length - 1 };
+    return `
+    <div class="ex" data-i="${i}">
+      <span class="idx">${i + 1}</span>
+      <span class="cellname">
+        <span class="clab">Exercise</span>
+        <input type="text" value="${esc(e.name)}" data-k="name" data-i="${i}" maxlength="40" aria-label="Name">
+      </span>
+      <span class="fmin">
+        <span class="clab">Minimum</span>
+        <input type="number" min="0" value="${e.min}" data-k="min" data-i="${i}" aria-label="Minimum">
+      </span>
+      <span class="fmax">
+        <span class="clab">Max</span>
+        <input type="number" min="0" value="${e.isLast ? '' : (e.max ?? '')}" data-k="max" data-i="${i}" aria-label="Maximum"
+               ${e.isLast ? 'disabled placeholder="none"' : ''}>
+      </span>
+      <span class="tools">
+        <button class="icon" data-move="-1" data-i="${i}" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="icon" data-move="1" data-i="${i}" title="Move down" aria-label="Move down" ${i === rowsData.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="icon" data-del="${i}" title="Remove" aria-label="Remove" ${rowsData.length <= 1 ? 'disabled' : ''}>×</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
+$('exRows').addEventListener('input', (ev) => {
+  const t = ev.target, i = +t.dataset.i, k = t.dataset.k;
+  if (!k) return;
+  dirty = true;
+  rowsData[i][k] = k === 'name' ? t.value : (t.value === '' ? null : +t.value);
+});
+
+$('exRows').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button');
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.del !== undefined) {
+    rowsData.splice(+btn.dataset.del, 1);
+  } else if (btn.dataset.move) {
+    const i = +btn.dataset.i, j = i + +btn.dataset.move;
+    if (j < 0 || j >= rowsData.length) return;
+    [rowsData[i], rowsData[j]] = [rowsData[j], rowsData[i]];
+  } else return;
+  dirty = true;
+  renderEx();
+});
+
+$('addEx').addEventListener('click', () => {
+  rowsData.push({ id: '', name: 'New exercise', min: 5, max: null });
+  dirty = true;
+  renderEx();
+});
+
+$('save').addEventListener('click', async () => {
+  const settings = {
+    interval_minutes: +$('interval').value,
+    response_minutes: +$('response').value,
+    quiet_start: normTime($('quietStart').value) || '00:00',
+    quiet_end: normTime($('quietEnd').value) || '07:00',
+    timezone: $('tz').value.trim() || 'UTC',
+    exercises: rowsData.map(e => ({
+      id: e.id, name: e.name, min: +e.min || 0,
+      max: e.max === null || e.max === '' ? null : +e.max,
+    })),
+  };
+  const msg = $('saveMsg');
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    });
+    const out = await r.json();
+    if (!r.ok || !out.ok) throw new Error(out.error || 'save failed');
+    dirty = false;
+    rowsData = out.settings.exercises.map(e => ({ ...e }));
+    renderEx();
+    msg.className = 'msg ok';
+    msg.textContent = 'Saved';
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = e.message;
+  }
+});
+
+$('notifyBtn').addEventListener('click', async () => {
+  const msg = $('saveMsg');
+  if (!('Notification' in window)) { msg.className = 'msg err'; msg.textContent = 'This browser has no notifications.'; return; }
+  const p = await Notification.requestPermission();
+  msg.className = 'msg ' + (p === 'granted' ? 'ok' : 'err');
+  msg.textContent = p === 'granted' ? 'Laptop alerts on — allow them on the dashboard' : 'Alerts blocked in this browser';
+});
+
+load();
+</script>
+</body>
+</html>
