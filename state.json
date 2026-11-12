@@ -1,5 +1,5 @@
 {
-  "bonus": 2,
+  "bonus": 3,
   "current": {
     "id": "0700f2d7b5e2",
     "sent_at": "2026-11-12T17:37:08Z",
@@ -11,8 +11,9 @@
         "reps": 12
       }
     ],
-    "status": "pending",
-    "bonus_applied": 2
+    "status": "missed",
+    "bonus_applied": 2,
+    "missed_at": "2026-11-12T17:47:08Z"
   },
   "history": [
     {
@@ -48,6 +49,18 @@
           "id": "pushups",
           "name": "Push-ups",
           "reps": 11
+        }
+      ]
+    },
+    {
+      "set": "0700f2d7b5e2",
+      "status": "missed",
+      "at": "2026-11-12T17:47:08Z",
+      "exercises": [
+        {
+          "id": "pushups",
+          "name": "Push-ups",
+          "reps": 12
         }
       ]
     }
