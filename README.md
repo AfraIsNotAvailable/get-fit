@@ -41,7 +41,7 @@ Lifetime totals = `round_items` of done/late rounds + `opening_balance`. The act
 | file | role |
 |---|---|
 | `getfit.py` | engine + state machine (`tick`, `confirm`, `status`, `report`, `reset`, `migrate`) |
-| `server.py` | tiny HTTP server for the two pages, port 8777 |
+| `server.py` | tiny HTTP server for the two pages: `:8777` plain, `:8443` TLS when `certs/` exists |
 | `index.html` | dashboard: lifetime total, clocks, dither calendar, month gauge, recent rounds |
 | `settings.html` | schedule + exercise stack, writes through `POST /api/settings` |
 | `tests.py` | state-machine tests (`python3 tests.py`) |

@@ -77,7 +77,6 @@
   .cal .spacer{width:11px; height:11px}
   .cal-legend{display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--faint); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase}
   .cal-legend canvas{display:block; width:11px; height:11px}
-  .cal-legend .hint{margin-left:auto; letter-spacing:.02em; text-transform:none; font-size:12px; color:var(--faint)}
 
   /* ledger */
   .ledger{padding-top:8px}
@@ -152,7 +151,6 @@
     .stamp .tz{display:none}
     .stamp{font-size:10px}
     .rrow{grid-template-columns:78px 1fr auto; gap:10px}
-    .cal-legend .hint{display:none}
   }
 </style>
 </head>
@@ -207,7 +205,6 @@
     <div class="cal" id="cal"></div>
     <div class="cal-legend">
       <span>less</span><span id="calKey" style="display:flex;gap:2px"></span><span>more</span>
-      <span class="hint">dot density = share of the day’s rounds finished · hue = reps</span>
     </div>
   </section>
 

@@ -272,9 +272,16 @@ $('save').addEventListener('click', async () => {
 $('notifyBtn').addEventListener('click', async () => {
   const msg = $('saveMsg');
   if (!('Notification' in window)) { msg.className = 'msg err'; msg.textContent = 'This browser has no notifications.'; return; }
+  if (!window.isSecureContext) {
+    msg.className = 'msg err';
+    msg.textContent = `Needs https — open https://${location.hostname}:8443/settings and allow it there`;
+    return;
+  }
   const p = await Notification.requestPermission();
   msg.className = 'msg ' + (p === 'granted' ? 'ok' : 'err');
-  msg.textContent = p === 'granted' ? 'Laptop alerts on — allow them on the dashboard' : 'Alerts blocked in this browser';
+  msg.textContent = p === 'granted' ? 'Laptop alerts on'
+    : p === 'denied' ? 'Blocked — allow notifications for this site in the browser'
+    : 'Not granted';
 });
 
 load();

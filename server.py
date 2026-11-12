@@ -13,7 +13,9 @@ import argparse
 import json
 import os
 import re
+import ssl
 import sys
+import threading
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -154,10 +156,27 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8777)
     ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--tls-port", type=int, default=8443)
+    ap.add_argument("--cert", default=str(BASE / "certs" / "getfit.crt"))
+    ap.add_argument("--key", default=str(BASE / "certs" / "getfit.key"))
     args = ap.parse_args()
     os.chdir(BASE)
+
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"[getfit] serving {BASE} on http://{args.host}:{args.port}", flush=True)
+    print(f"[getfit] http  {BASE} on http://{args.host}:{args.port}", flush=True)
+
+    # Browsers only allow notification permissions on a secure context, so the
+    # same app is also served over TLS on its own port when a cert is present.
+    httpsd = None
+    if Path(args.cert).exists() and Path(args.key).exists():
+        httpsd = ThreadingHTTPServer((args.host, args.tls_port), Handler)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(args.cert, args.key)
+        httpsd.socket = ctx.wrap_socket(httpsd.socket, server_side=True)
+        print(f"[getfit] https {BASE} on https://{args.host}:{args.tls_port}", flush=True)
+
+    if httpsd:
+        threading.Thread(target=httpsd.serve_forever, daemon=True).start()
     httpd.serve_forever()
     return 0
 

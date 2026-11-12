@@ -15,3 +15,6 @@ legacy/
 # sqlite sidecars
 getfit.db-wal
 getfit.db-shm
+
+# local TLS material for the https listener
+certs/
