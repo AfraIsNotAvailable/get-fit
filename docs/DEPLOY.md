@@ -43,8 +43,9 @@ the same `getfit.confirm()` the hook does, so a machine without Telegram is stil
 opening a port to pull code is a bad trade. The runner dials out to GitHub; GitHub hands it the job;
 the job calls `scripts/deploy.sh`, the same script you can run by hand.
 
-**Registering the runner** (done on this box on 2026-11-14 — `/opt/data/actions-runner`, name
-`raspberrypi`, labels `self-hosted, getfit`, work dir `_work`):
+**Registering the runner** (done on this box on 2026-11-14 — `/home/afra/.hermes/actions-runner` on the
+host, i.e. `/opt/data/actions-runner` inside the Hermes container; name `raspberrypi`, labels
+`self-hosted, getfit`, work dir `_work`):
 
 1. GitHub → the repo → *Settings → Actions → Runners → New self-hosted runner* (Linux/ARM64 here).
 2. Download per the shown commands, verify the sha256, extract.
@@ -66,8 +67,9 @@ the job calls `scripts/deploy.sh`, the same script you can run by hand.
 The `getfit` label is what `runs-on: [self-hosted, getfit]` matches — without it the job queues
 forever. `self-hosted` is applied automatically, so `runs-on: self-hosted` also works.
 
-Optional: set the repo variable `GETFIT_HOME` if the checkout is not
-`/opt/data/home/dev/web/get-fit`; the port defaults to 8777.
+Optional: set the repo variable `GETFIT_HOME` if the checkout is not `/home/afra/get-fit`; the port
+defaults to 8777. The workflow's own default is that path, so a variable is only needed to override
+it.
 
 **What the deploy does**, in order: fetch → if HEAD already matches `origin/main`, health-check and
 stop (a push that touches nothing runtime-safe must not bounce the service) → park `getfit.db` →
@@ -101,15 +103,27 @@ If you develop on one machine and deploy on another, keep the DB out of the way 
 
 ## What this Pi does today
 
-- Cron job `get-fit` (Hermes, `every 1m`, `no_agent`) runs `/opt/data/scripts/getfit-tick.sh`, which
-  is the Pi-local copy of `scripts/getfit-tick.sh` with `APP` and `PY` hard-coded.
-- The gateway hook `/opt/data/hooks/getfit-confirm/` turns a Telegram "done" into
-  `getfit.py confirm` and posts the receipt; the plugin `/opt/data/plugins/getfit-confirm-cheap/`
-  keeps the follow-up agent turn cheap and silent.
+The checkout is `/home/afra/get-fit` on the host, next to the other services in `~`. The Hermes
+container mounts it at the same path (`- /home/afra/get-fit:/home/afra/get-fit` in
+`/home/afra/hermes/docker-compose.yml`), so the scheduler, the confirm hook and the runner all use
+identical paths. The app itself still runs inside that container (`network_mode: host`, uid 1000) and
+the host reaches the dashboard on `127.0.0.1:8777`.
+
+- Public URL `https://fit.afrasinei.dev` — one ingress rule in `/etc/cloudflared/config.yml` (root on
+  the host) pointing at `http://localhost:8777`, with a Cloudflare Access application (`Get fit`,
+  one-time PIN, allow `afrasinei.serban@gmail.com`) in front of it. On the LAN: `:8777`, and `:8443`
+  when `certs/` exists.
+- Cron job `get-fit` (Hermes, `every 1m`, `no_agent`) runs `~/.hermes/scripts/getfit-tick.sh`
+  (`/opt/data/scripts/getfit-tick.sh` in the container), the Pi-local copy of
+  `scripts/getfit-tick.sh` with `APP` and `PY` hard-coded to the checkout and the venv python.
+- The gateway hook `~/.hermes/hooks/getfit-confirm/` turns a Telegram "done" into
+  `getfit.py confirm` and posts the receipt; the plugin `~/.hermes/plugins/getfit-confirm-cheap/`
+  keeps the follow-up agent turn cheap and silent. Both carry the checkout path: after moving the
+  repo, update `APP` in the hook or confirmations stop landing without an error.
 - TLS material in `certs/` (gitignored) with SANs for this box's IPs.
 
-When you move development off this box, none of that has to change until you decide to deploy a
-newer version here: `git pull` + restart `server.py` is the whole upgrade.
+Upgrading is `git push` from the development machine: the runner pulls, tests, restarts and
+health-checks, and the minute keepalive puts the dashboard back if anything dies in between.
 
 ## Where the thinking lives
 

@@ -23,7 +23,7 @@ jobs:
     runs-on: [self-hosted, getfit]
     timeout-minutes: 15
     env:
-      GETFIT_HOME: ${{ vars.GETFIT_HOME || '/opt/data/home/dev/web/get-fit' }}
+      GETFIT_HOME: ${{ vars.GETFIT_HOME || '/home/afra/get-fit' }}
       GETFIT_PORT: '8777'
     steps:
       - name: Deploy origin/main

@@ -68,6 +68,9 @@ as unattributed and it is invisible to the model. Never leave one unattributed.
 
 ## The dashboard
 
+Served at `https://fit.afrasinei.dev` (Cloudflare tunnel + Access, one-time PIN), on the LAN at
+`:8777` / `:8443` TLS.
+
 The band shows the **assignment** — the set that is on the clock, or the one the engine will send
 next — with every exercise linked to its form article. An exercise with no `form_url` is red, and a
 hover says so; fix it in Settings rather than guessing a link. A wrong article is worse than none.
