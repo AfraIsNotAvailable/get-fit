@@ -5,6 +5,7 @@ import {
   CheckinInput, ConfirmationInput, PairInput, SettingsInput, ValidationError, parseOrThrow,
 } from "@getfit/contracts";
 import type { Device } from "@getfit/db";
+import type { CheckinKind } from "@getfit/engine";
 import type { AuthService } from "./auth.js";
 import { HttpError, type CheckinBody, type Services } from "./service.js";
 
@@ -130,13 +131,36 @@ export function createApp(services: Services, auth: AuthService, options: AppOpt
 
   app.get("/api/v1/checkins/todo", (_req, res) => res.json(services.checkinTodo()));
 
+  app.get("/api/v1/checkins", (req, res) => {
+    const kind = typeof req.query.kind === "string" ? (req.query.kind as CheckinKind) : undefined;
+    if (kind && kind !== "gate" && kind !== "post") {
+      throw new ValidationError([{ path: "kind", message: "kind must be gate or post" }]);
+    }
+    const limit = Number(req.query.limit ?? 50);
+    res.json(services.checkins({
+      kind,
+      from: typeof req.query.from === "string" ? req.query.from : undefined,
+      to: typeof req.query.to === "string" ? req.query.to : undefined,
+      limit: Number.isFinite(limit) ? limit : 50,
+    }));
+  });
+
   app.post("/api/v1/checkins", (req, res) => {
     const body = parseOrThrow(CheckinInput, req.body ?? {});
     res.status(201).json(services.checkin(body as CheckinBody));
   });
 
   app.get("/api/v1/muscles", (_req, res) => res.json(services.dashboard(["muscles"]).body.muscles));
+  app.get("/api/v1/muscles/:slug", (req, res) => res.json(services.muscleDetail(req.params.slug)));
+  app.get("/api/v1/library", (_req, res) => res.json(services.library()));
   app.get("/api/v1/profile", (_req, res) => res.json(services.dashboard(["profile"]).body.profile));
+
+  app.get("/api/v1/profile/history", (req, res) => {
+    const limit = Number(req.query.limit ?? 40);
+    res.json(services.profileHistory(Number.isFinite(limit) ? limit : 40));
+  });
+
+  app.post("/api/v1/profile/refit", (_req, res) => res.json(services.refit()));
 
   app.get("/api/v1/calendar", (_req, res) => {
     const body = services.dashboard(["calendar", "months"]).body;

@@ -212,4 +212,52 @@ describe("the API over a real database", () => {
     expect(missing.status).toBe(404);
     expect(missing.headers.get("content-type")).toContain("application/problem+json");
   });
+
+  it("the check-in history and the library are readable", async () => {
+    const history = await call("/api/v1/checkins?limit=5");
+    expect(history.status).toBe(200);
+    expect(Array.isArray(history.body)).toBe(true);
+
+    const gates = await call("/api/v1/checkins?kind=gate");
+    expect(gates.status).toBe(200);
+    expect((gates.body as { kind: string }[]).every((row) => row.kind === "gate")).toBe(true);
+
+    const bad = await call("/api/v1/checkins?kind=sideways");
+    expect(bad.status).toBe(422);
+    expect((bad.body as { errors: { path: string }[] }).errors[0]?.path).toBe("kind");
+
+    const library = await call("/api/v1/library");
+    expect(library.status).toBe(200);
+    const row = (library.body as { exerciseSlug: string; k: number; exposure: number }[])[0]!;
+    expect(row.exerciseSlug).toBeTruthy();
+    expect(typeof row.k).toBe("number");
+  });
+
+  it("one muscle carries its attribution, and an unknown slug is a 404", async () => {
+    const chest = await call("/api/v1/muscles/chest");
+    expect(chest.status).toBe(200);
+    const body = chest.body as { slug: string; attribution: { muscleSlug: string }[] };
+    expect(body.slug).toBe("chest");
+    expect(body.attribution.length).toBeGreaterThan(0);
+    expect(body.attribution.every((row) => row.muscleSlug === "chest")).toBe(true);
+
+    const missing = await call("/api/v1/muscles/tail");
+    expect(missing.status).toBe(404);
+  });
+
+  it("refit is idempotent and leaves an audit trail", async () => {
+    const first = await call("/api/v1/profile/refit", { method: "POST" });
+    expect(first.status).toBe(200);
+    expect((first.body as { ok: boolean }).ok).toBe(true);
+
+    const profileBefore = (await call("/api/v1/profile")).body;
+    const second = await call("/api/v1/profile/refit", { method: "POST" });
+    expect(second.status).toBe(200);
+    expect((second.body as { changed: unknown[] }).changed).toEqual([]);
+    expect((await call("/api/v1/profile")).body).toEqual(profileBefore);
+
+    const history = await call("/api/v1/profile/history?limit=3");
+    expect(history.status).toBe(200);
+    expect(history.body).toEqual([]);          // nothing moved, so nothing was written
+  });
 });

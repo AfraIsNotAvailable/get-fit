@@ -72,8 +72,9 @@ py = {
 }
 
 # ---------------------------------------------------------------- ts side
+# auth landed after this harness was written: /health is open, /dashboard is not
 env = dict(os.environ, GETFIT_DB=str(SCRATCH / "ts.db"), GETFIT_PORT=str(PORT),
-           GETFIT_HOST="127.0.0.1", SCHEDULER="off")
+           GETFIT_HOST="127.0.0.1", SCHEDULER="off", GETFIT_REQUIRE_TOKEN="0")
 server = subprocess.Popen(
     [str(REPO / "apps/server/node_modules/.bin/tsx"), "src/main.ts"],
     cwd=REPO / "apps/server", env=env,

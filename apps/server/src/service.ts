@@ -115,6 +115,67 @@ export class Services {
     return this.dashboard().body.checkinTodo;
   }
 
+  /** Check-in history, newest first. The Android client needs the audit trail
+   *  even though the web dashboard never shows it. */
+  checkins(filter: { kind?: CheckinKind; from?: string; to?: string; limit?: number } = {}): unknown[] {
+    const limit = Math.max(1, Math.min(200, filter.limit ?? 50));
+    return [...this.snapshot().checkins]
+      .filter((c) => (!filter.kind || c.kind === filter.kind))
+      .filter((c) => (!filter.from || c.at >= filter.from) && (!filter.to || c.at <= filter.to))
+      .sort((a, b) => b.at.localeCompare(a.at) || b.id - a.id)
+      .slice(0, limit);
+  }
+
+  /** Every (exercise, muscle) pair with its learned cost. */
+  library(): { exerciseSlug: string; muscleSlug: string; muscleName: string; role: string;
+    weight: number; k: number; exposure: number }[] {
+    return this.snapshot().attribution.map((a) => ({
+      exerciseSlug: a.exerciseSlug,
+      muscleSlug: a.muscleSlug,
+      muscleName: MUSCLE_NAME[a.muscleSlug] ?? a.muscleSlug,
+      role: a.role,
+      weight: a.weight,
+      k: a.k,
+      exposure: a.exposure,
+    }));
+  }
+
+  /** One muscle plus the exercises that load it. */
+  muscleDetail(slug: string): unknown {
+    const row = this.dashboard(["muscles"]).body.muscles.find((m) => m.slug === slug);
+    if (!row) throw new HttpError(404, "unknown_muscle", `no muscle ${slug}`);
+    return { ...row, attribution: this.library().filter((r) => r.muscleSlug === slug) };
+  }
+
+  /** Parameter changes over time, newest first. */
+  profileHistory(limit = 40): unknown[] {
+    const size = Math.max(1, Math.min(200, limit));
+    return this.db
+      .prepare("SELECT id, at, key, value, previous, n, reason FROM profile_history ORDER BY id DESC LIMIT ?")
+      .all(size);
+  }
+
+  /** Recompute the profile from the ledger. Idempotent: same ledger, same answer. */
+  refit(): unknown {
+    this.guard();
+    return withImmediate(this.db, () => {
+      const now = this.now();
+      const result = engineRefit(this.snapshot(now), now);
+      saveProfile(this.db, result.profile, result.history, now, {
+        wear_half_life: result.summary.wear_half_life.n,
+        stop_base: result.summary.stop_base.n,
+        readiness_influence: result.summary.readiness_influence.n,
+      });
+      saveMuscles(this.db, result.muscles);
+      return {
+        ok: true,
+        changed: result.history.map((h) => ({ key: h.key, previous: h.previous, value: h.value })),
+        halfLife: result.profile.wear_half_life,
+        summary: result.summary,
+      };
+    });
+  }
+
   /** The vocabulary a client needs to render without hard-coded strings. */
   meta(): unknown {
     return {
