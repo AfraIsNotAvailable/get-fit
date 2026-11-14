@@ -1,0 +1,38 @@
+name: deploy
+
+# Runs on the Pi itself, via a self-hosted runner: a GitHub-hosted runner has no
+# route into a home network, and opening one just to pull is the wrong trade.
+# The runner checks in with GitHub, picks the job up, and calls the same script
+# a human would run by hand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main        # one deploy at a time, and never cancel a running one
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: pull and restart
+    runs-on: [self-hosted, getfit]
+    timeout-minutes: 15
+    env:
+      GETFIT_HOME: ${{ vars.GETFIT_HOME || '/opt/data/home/dev/web/get-fit' }}
+      GETFIT_PORT: '8777'
+    steps:
+      - name: Deploy origin/main
+        run: "$GETFIT_HOME/scripts/deploy.sh"
+
+      - name: Confirm the deployed version
+        if: always()
+        run: |
+          git -C "$GETFIT_HOME" log --oneline -1
+          curl -sf -m 3 "http://127.0.0.1:$GETFIT_PORT/api/state" \
+            | head -c 120 || echo "state endpoint unavailable"
+          echo

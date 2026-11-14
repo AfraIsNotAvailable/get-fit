@@ -36,6 +36,48 @@ the same `getfit.confirm()` the hook does, so a machine without Telegram is stil
 6. **Verify**: `python3 getfit.py status` shows the clock; `python3 getfit.py tick --dry-run` shows
    what the next tick would send; `python3 tests.py` should pass (60 assertions).
 
+## Deploying on push
+
+`.github/workflows/deploy.yml` deploys `main` to this host on every push. It runs on a
+**self-hosted runner**, because a GitHub-hosted runner cannot reach a machine behind a home router and
+opening a port to pull code is a bad trade. The runner dials out to GitHub; GitHub hands it the job;
+the job calls `scripts/deploy.sh`, the same script you can run by hand.
+
+**Register the runner once, on this host:**
+
+1. GitHub → the repo → *Settings → Actions → Runners → New self-hosted runner* (Linux/ARM64 here).
+2. Follow the shown download commands, then:
+
+   ```
+   ./config.sh --url https://github.com/AfraIsNotAvailable/get-fit --token <TOKEN> \
+               --labels getfit --name raspberrypi --work /opt/data/actions-runner
+   sudo ./svc.sh install && sudo ./svc.sh start
+   ```
+
+   The `getfit` label is what `runs-on: [self-hosted, getfit]` matches — without it the job queues
+   forever.
+3. Optional: set the repo variable `GETFIT_HOME` if the checkout is not
+   `/opt/data/home/dev/web/get-fit`; port defaults to 8777.
+
+**What the deploy does**, in order: fetch → if HEAD already matches `origin/main`, health-check and
+stop (a push that touches nothing runtime-safe must not bounce the service) → park `getfit.db` →
+`git reset --hard origin/main` → put the database back → run `tests.py` → restart the dashboard →
+poll `/api/state`. Tests failing or the health check failing rolls the **code** back to the previous
+commit; the database is never rolled back, because the state is not the deploy's to rewrite.
+
+Consequences worth knowing:
+
+- The host is a **deploy target**, not a working copy. `reset --hard` discards local edits here by
+  design. Develop elsewhere; push; let the runner pull.
+- `getfit.db` is parked and restored across the reset, so rounds logged during development survive
+  the deploy. The park window is two `mv`s wide — a tick landing inside it loses that one write.
+- The minute cron keepalive also restarts the dashboard if it is down, so a failed health check is
+  not the end of the world; the rollback just makes sure the *code* is the last known good one.
+
+**No runner?** The script is idempotent, so polling works instead: put
+`*/5 * * * * /opt/data/home/dev/web/get-fit/scripts/deploy.sh >> /opt/data/logs/getfit-deploy.log 2>&1`
+in cron and it deploys within five minutes of a push, doing nothing when there is nothing to do.
+
 ## One writer only
 
 `getfit.db` being tracked is what makes the history portable, but it also means **two machines

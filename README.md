@@ -113,6 +113,9 @@ Background and sources: `docs/fatigue-model-research.md`.
 `docs/DEPLOY.md` is the checklist: what the service is, how to schedule the tick on another host,
 why only one machine may write to `getfit.db`, and what this box currently runs.
 
+Pushing to `main` deploys here automatically once the self-hosted runner is registered —
+`.github/workflows/deploy.yml` calls `scripts/deploy.sh`, which is also safe to run by hand.
+
 ## Common commands
 
 ```bash
