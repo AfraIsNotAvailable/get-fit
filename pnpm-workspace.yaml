@@ -1,3 +1,9 @@
 packages:
   - "packages/*"
   - "apps/*"
+
+# pnpm 11 replaced onlyBuiltDependencies with this map, and pnpm 12 ignores the old key
+# entirely and exits with ERR_PNPM_IGNORED_BUILDS. esbuild's postinstall verifies the
+# platform binary vite and the server bundler use; without approval install fails.
+allowBuilds:
+  esbuild: true
