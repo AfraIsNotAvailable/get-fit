@@ -249,31 +249,53 @@ export interface Observation {
   reported: number;
   level: number;
   rir: number | null;
+  /** post = minutes after the set (cost, feeds k); gate = next morning (decay). */
+  source: "post" | "gate";
 }
+
+/** How far back a morning report looks for the load it is describing. */
+const RECOVERY_WINDOW_H = 48;
 
 export function observations(snap: Snapshot): Observation[] {
   const out: Observation[] = [];
-  for (const row of snap.checkins.filter((c) => c.kind === "post" && c.perMuscle).sort((a, b) => a.id - b.id)) {
+  const rows = snap.checkins
+    .filter((c) => (c.kind === "post" || c.kind === "gate") && c.perMuscle)
+    .sort((a, b) => a.id - b.id);
+
+  for (const row of rows) {
     for (const [muscle, rawLevel] of Object.entries(row.perMuscle ?? {})) {
-      const events = snap.wearEvents.filter((e) => e.roundKey === row.roundKey && e.muscleSlug === muscle);
-      const dose = events.reduce((sum, e) => sum + Number(e.predicted), 0);
-      if (!events.length || dose < 1.0) continue;
-      const t0 = events.map((e) => parseIso(e.at)).sort((a, b) => a.getTime() - b.getTime())[0];
-      if (!t0) continue;
       const level = Math.trunc(Number(rawLevel));
       if (!Number.isFinite(level) || !(level in SORENESS_TO_WEAR)) continue;
+      const reported = SORENESS_TO_WEAR[level] as number;
       const t1 = parseIso(row.at);
+
+      if (row.kind === "post") {
+        const events = snap.wearEvents.filter((e) => e.roundKey === row.roundKey && e.muscleSlug === muscle);
+        const dose = events.reduce((sum, e) => sum + Number(e.predicted), 0);
+        if (!events.length || dose < 1.0) continue;
+        const t0 = events.map((e) => parseIso(e.at)).sort((a, b) => a.getTime() - b.getTime())[0];
+        if (!t0) continue;
+        out.push({
+          checkin: row.id, muscle, round: String(row.roundKey), dose, t0, t1,
+          hours: hoursBetween(t0, t1), reported, level, rir: row.rir, source: "post",
+        });
+        continue;
+      }
+
+      // A gate report answers "how sore is it now", which is only useful against the
+      // load that caused it: the most recent one, within two days. Older than that and
+      // the answer says nothing about the decay rate.
+      const recent = snap.wearEvents
+        .filter((e) => e.muscleSlug === muscle)
+        .map((e) => ({ at: parseIso(e.at), predicted: Number(e.predicted), roundKey: e.roundKey }))
+        .filter((e) => e.at.getTime() <= t1.getTime()
+          && hoursBetween(e.at, t1) <= RECOVERY_WINDOW_H)
+        .sort((a, b) => b.at.getTime() - a.at.getTime())[0];
+      if (!recent || recent.predicted < 1.0) continue;
       out.push({
-        checkin: row.id,
-        muscle,
-        round: String(row.roundKey),
-        dose,
-        t0,
-        t1,
-        hours: hoursBetween(t0, t1),
-        reported: SORENESS_TO_WEAR[level] as number,
-        level,
-        rir: row.rir,
+        checkin: row.id, muscle, round: recent.roundKey, dose: recent.predicted,
+        t0: recent.at, t1, hours: hoursBetween(recent.at, t1), reported, level, rir: null,
+        source: "gate",
       });
     }
   }

@@ -42,7 +42,9 @@ export interface CheckinTodo {
   } | null;
   expiresAt: string | null; secondsLeft: number | null;
   windowMinutes: number; readiness: Readiness;
-  gateAnswered: Record<string, number>; lastGate: Record<string, unknown> | null;
+  gateAnswered: Record<string, number>;
+  askMuscles: { slug: string; name: string; load: number; lastLoadedAt: string; hoursAgo: number }[];
+  lastGate: Record<string, unknown> | null;
 }
 
 export interface Dashboard {

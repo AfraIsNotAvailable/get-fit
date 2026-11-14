@@ -51,6 +51,8 @@ export interface Dashboard {
     windowMinutes: number;
     readiness: Readiness;
     gateAnswered: Record<string, number>;
+    /** Which muscles the gate should ask about this morning, most loaded first. */
+    askMuscles: { slug: string; name: string; load: number; lastLoadedAt: string; hoursAgo: number }[];
     lastGate: Record<string, unknown> | null;
   };
   selection: {
@@ -136,6 +138,39 @@ export function view(snap: Snapshot, now: Date, opening: Parameters<typeof total
   if (typeof gate.pain === "boolean") gateAnswered.pain = gate.pain ? 1 : 0;
   const lastGate = [...snap.checkins].filter((c) => c.kind === "gate").sort((a, b) => b.id - a.id)[0] ?? null;
 
+  // What the morning gate should ask about: muscles that took load in the last two
+  // days and have not been reported today. The decay fit needs the same muscle at
+  // 12/24/36 hours, and that only comes from a daily answer — the after-set sheet is
+  // minutes after the set and can say nothing about recovery.
+  const ASK_LIMIT = 6;
+  const today = localDate(now, snap.settings.timezone);
+  const reportedToday = new Set(
+    snap.checkins
+      .filter((c) => c.kind === "gate" && c.localDate === today && c.perMuscle)
+      .flatMap((c) => Object.keys(c.perMuscle ?? {})),
+  );
+  const lastLoad = new Map<string, Date>();
+  for (const event of snap.wearEvents) {
+    const at = parseIso(event.at);
+    if (at.getTime() > now.getTime() || hoursBetween(at, now) > 48) continue;
+    const seen = lastLoad.get(event.muscleSlug);
+    if (!seen || at.getTime() > seen.getTime()) lastLoad.set(event.muscleSlug, at);
+  }
+  const askMuscles = muscles
+    .filter((muscle) => !reportedToday.has(muscle.slug) && lastLoad.has(muscle.slug))
+    .sort((a, b) => b.load - a.load)
+    .slice(0, ASK_LIMIT)
+    .map((muscle) => {
+      const at = lastLoad.get(muscle.slug) as Date;
+      return {
+        slug: muscle.slug,
+        name: muscle.name,
+        load: pyRound(muscle.load, 1),
+        lastLoadedAt: iso(at),
+        hoursAgo: pyRound(hoursBetween(at, now), 1),
+      };
+    });
+
   const checkinMuscles = window
     ? [...new Set(
         snap.wearEvents
@@ -210,6 +245,7 @@ export function view(snap: Snapshot, now: Date, opening: Parameters<typeof total
       windowMinutes: snap.settings.responseMinutes,
       readiness: ready,
       gateAnswered,
+      askMuscles,
       lastGate: lastGate as unknown as Record<string, unknown> | null,
     },
     selection: {

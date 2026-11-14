@@ -1161,6 +1161,26 @@ components:
           additionalProperties:
             type: [integer]
           example: { sleep: 4, stress: 2 }
+        askMuscles:
+          type: array
+          maxItems: 6
+          description: |
+            The muscles the morning gate should ask about, most loaded first. Only muscles
+            that took load in the last 48 hours and have not been reported today appear.
+
+            This is the recovery signal: the after-set sheet is answered minutes after the
+            set and measures cost (`k`), while these answers land 12–24 hours later and are
+            what the decay rate is fitted from. Send them back as `muscleSoreness` on the
+            gate check-in.
+          items:
+            type: object
+            required: [slug, name, load, lastLoadedAt, hoursAgo]
+            properties:
+              slug: { type: string }
+              name: { type: string }
+              load: { type: number }
+              lastLoadedAt: { type: string, format: date-time }
+              hoursAgo: { type: number }
         lastGate:
           type: [object, "null"]
           additionalProperties: true

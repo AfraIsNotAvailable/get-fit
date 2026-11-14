@@ -237,7 +237,11 @@ export function recordCheckin(
   let fitted: RefitResult["summary"] | null = null;
   if (kind === "gate") {
     draft.readiness = readiness(next, now).score;
-  } else {
+  }
+  // A post-set answer always refits: it just moved k. A morning answer refits when it
+  // carried per-muscle soreness, because that is the evidence the decay rate is fitted
+  // from — otherwise the parameter would only move after the next set.
+  if (kind === "post" || draft.perMuscle) {
     try {
       const fittedResult = refit(next, now);
       next.profile = fittedResult.profile;

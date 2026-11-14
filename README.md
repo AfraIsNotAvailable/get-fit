@@ -1,6 +1,42 @@
 # get-fit
 
-Escalating workout stack, driven by Hermes cron + a Telegram confirmation, stored in SQLite.
+An escalating workout stack — sets arrive on a clock, the stack grows when you answer late and
+resets when you answer on time — with a fatigue model per muscle group and a dashboard for the
+state it is in.
+
+**Two applications live in this repo, and only one is being developed.**
+
+| | where | status |
+|---|---|---|
+| **v2 — this one** | `packages/engine`, `packages/db`, `packages/contracts`, `apps/server`, `apps/web` | **main**. A pure-TypeScript engine, an Express `/api/v1` described by `docs/openapi.yaml`, and a React dashboard. This is what everything new goes into. Mobile (Android) is next against the same API. |
+| **v1 — the Python app** | `getfit.py`, `muscles.py`, `server.py`, `index.html`, `settings.html`, `tests.py` | **frozen** on branch [`v1`](../../tree/v1) (tag `v1.0-python`). It is what the Pi serves today at `fit.afrasinei.dev`; it keeps running, nothing new lands there. |
+
+The two are numerically equivalent on the live database — `tools/parity.py` diffs the TypeScript
+dashboard against Python's `getfit.view()` and must report **0 diffs** — and `tools/spec-check.py`
+keeps the OpenAPI document honest against the running server.
+
+## Layout
+
+```
+packages/engine      pure domain model: schedule, selection, wear, check-ins, calendar, view model
+packages/db          SQLite through node:sqlite; schema, migrations, repositories
+packages/contracts   zod schemas for every request body
+apps/server          Express 5, device tokens, scheduler, notifier, CLI
+apps/web             Vite + React + TypeScript dashboard and settings
+tools/               parity.py, spec-check.py, api-sweep.py, scenario.ts, refit-dump.ts
+docs/openapi.yaml    the API contract (camelCase, follows the server)
+docs/rewrite/        the plan, the module split, the client notes, the contract drift register
+```
+
+Local harness, the gates and the layout traps are in
+[`docs/rewrite/README.md`](docs/rewrite/README.md) and, for an agent working on this box,
+`references/local-dev.md` in the `getfit-challenge` skill.
+
+## v1: the Python app
+
+Everything below describes the frozen Python implementation. It still explains the rules the
+TypeScript engine reproduces, so it is worth reading before touching the model — but the code it
+names is only on the `v1` branch.
 
 ## How it works
 

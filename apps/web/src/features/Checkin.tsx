@@ -42,6 +42,7 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
   const [prs, setPrs] = useState<number | null>(null);
   const [pain, setPain] = useState<number | null>(null);
   const [painWhere, setPainWhere] = useState("");
+  const [sore, setSore] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -62,10 +63,11 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
       if (soreness !== null) body.soreness = soreness;
       if (prs !== null) body.prs = prs;
       if (pain !== null) { body.pain = pain === 1; if (pain === 1 && painWhere) body.painWhere = painWhere; }
+      if (Object.keys(sore).length) body.muscleSoreness = sore;
       await api.checkin(body);
       setMsg("saved");
       setSleep(""); setStress(null); setFatigue(null); setSoreness(null); setPrs(null);
-      setPain(null); setPainWhere("");
+      setPain(null); setPainWhere(""); setSore({});
       onDone();
     } catch (error) {
       setMsg(error instanceof ApiError ? (error.problem.errors?.[0]?.message ?? error.message) : "could not save");
@@ -104,6 +106,35 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
           <Seg value={prs} options={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} onChange={setPrs} />
         </Question>
       ) : null}
+      {/* the daily recovery report: muscles that took load in the last two days. This is
+          what the decay curve is fitted from — the after-set sheet answers minutes after
+          the set and cannot say anything about recovery. */}
+      {dash.checkinTodo.askMuscles.length > 0 ? (
+        <Question
+          title="Sore today"
+          help="How sore it is this morning, 1 = not at all, 5 = too sore to train. Two days of these answers are what teach the recovery rate."
+        >
+          <div className="asklist">
+            {dash.checkinTodo.askMuscles.map((muscle) => (
+              <div className="askrow" key={muscle.slug}>
+                <span className="askname">{muscle.name}</span>
+                <Seg
+                  value={sore[muscle.slug] ?? null}
+                  options={SEG5}
+                  onChange={(value) => setSore((prev) => {
+                    const next = { ...prev };
+                    if (value === null) delete next[muscle.slug];
+                    else next[muscle.slug] = value;
+                    return next;
+                  })}
+                />
+                <span className="askwhen">{Math.round(muscle.hoursAgo)}h ago</span>
+              </div>
+            ))}
+          </div>
+        </Question>
+      ) : null}
+
       {open.includes("pain") ? (
         <Question title="Sharp pain" help="A flagged muscle is parked for 48 hours and excluded from selection.">
           <Seg value={pain} options={[0, 1]} onChange={setPain} labels={(n) => (n === 1 ? "yes" : "no")} />

@@ -245,6 +245,38 @@ describe("the API over a real database", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("the morning gate asks about loaded muscles and takes their soreness", async () => {
+    const dash = (await call("/api/v1/dashboard")).body as {
+      checkinTodo: { askMuscles: { slug: string; name: string; hoursAgo: number }[] };
+    };
+    const asked = dash.checkinTodo.askMuscles;
+    expect(Array.isArray(asked)).toBe(true);
+    expect(asked.length).toBeLessThanOrEqual(6);
+    if (asked.length > 0) {
+      expect(asked[0]!.name).toBeTruthy();
+      expect(typeof asked[0]!.hoursAgo).toBe("number");
+    }
+
+    const target = asked[0];
+    if (target) {
+      const answer = await call("/api/v1/checkins", {
+        method: "POST",
+        body: JSON.stringify({ kind: "gate", muscleSoreness: { [target.slug]: 4 } }),
+      });
+      expect(answer.status).toBe(201);
+      const after = (await call("/api/v1/dashboard")).body as {
+        checkinTodo: { askMuscles: { slug: string }[] };
+      };
+      expect(after.checkinTodo.askMuscles.map((m) => m.slug)).not.toContain(target.slug);
+    }
+
+    const invented = await call("/api/v1/checkins", {
+      method: "POST",
+      body: JSON.stringify({ kind: "gate", muscleSoreness: { tail: 3 } }),
+    });
+    expect(invented.status).toBe(422);
+  });
+
   it("refit is idempotent and leaves an audit trail", async () => {
     const first = await call("/api/v1/profile/refit", { method: "POST" });
     expect(first.status).toBe(200);
