@@ -25,8 +25,12 @@ jobs:
     env:
       GETFIT_HOME: ${{ vars.GETFIT_HOME || '/home/afra/get-fit' }}
       GETFIT_PORT: '8777'
+      # What the box runs. `main` is the TypeScript port; the Pi serves the Python app
+      # from `v1` until the cutover, so the repo variable points there. Flip it back to
+      # `main` (or unset it) as the last step of the cutover, not before.
+      GETFIT_BRANCH: ${{ vars.GETFIT_BRANCH || 'main' }}
     steps:
-      - name: Deploy origin/main
+      - name: Deploy origin/${{ vars.GETFIT_BRANCH || 'main' }}
         run: "$GETFIT_HOME/scripts/deploy.sh"
 
       - name: Confirm the deployed version
