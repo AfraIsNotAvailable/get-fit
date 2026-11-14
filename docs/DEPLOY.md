@@ -56,9 +56,9 @@ host, i.e. `/opt/data/actions-runner` inside the Hermes container; name `raspber
 **Three things about this host that make the stock instructions not apply**, all handled by
 `start.sh`:
 
-- **No systemd** (pid 1 is s6), so `svc.sh install` cannot work. The runner is started detached and
-  kept alive by the tick script (`/opt/data/scripts/getfit-tick.sh`), which resurrects it within a
-  minute of it dying — the same pattern that keeps the dashboard up.
+- **No systemd inside the container** (pid 1 is s6), so `svc.sh install` cannot work there — the host
+  itself runs systemd (which now owns the dashboard). The runner is started detached and kept alive by
+  the tick script, which resurrects it within a minute of it dying.
 - **No root and no apt lists**, so `libicu` — which the bundled .NET wants — cannot be installed,
   and `config.sh` refuses to run without it. A copy of Debian's `libicu76` is extracted under
   `libicu/` and `start.sh` puts it on `LD_LIBRARY_PATH`.
@@ -122,8 +122,13 @@ the host reaches the dashboard on `127.0.0.1:8777`.
   repo, update `APP` in the hook or confirmations stop landing without an error.
 - TLS material in `certs/` (gitignored) with SANs for this box's IPs.
 
-Upgrading is `git push` from the development machine: the runner pulls, tests, restarts and
-health-checks, and the minute keepalive puts the dashboard back if anything dies in between.
+The dashboard runs as **`getfit.service`** on the host (`/etc/systemd/system/getfit.service`, `User=afra`,
+`Restart=always`, enabled at boot) — outside the container, so a container recreate or the runner's
+post-job cleanup cannot take it down. The Hermes tick no longer starts the server: if systemd is gone,
+start it by hand rather than letting the tick race it for the port.
+
+Upgrading is `git push` from the development machine: the runner pulls, tests, restarts (the kill *is*
+the restart — systemd brings it back in about two seconds) and health-checks.
 
 ## Where the thinking lives
 

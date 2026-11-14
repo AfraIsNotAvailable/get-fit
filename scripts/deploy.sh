@@ -36,6 +36,13 @@ restart_server() {
     say "stopping dashboard (pid $pid)"
     kill "$pid" 2>/dev/null || true
     for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+    # If something supervises the dashboard (systemd Restart=always on the Pi,
+    # s6 elsewhere), the kill *is* the restart: wait for it to come back before
+    # spawning a second copy that would only race it for the port.
+    for _ in $(seq 1 16); do
+      if healthy; then say "a supervisor restarted the dashboard"; return 0; fi
+      sleep 0.5
+    done
   fi
   # double-fork: the cron keepalive does the same, and a server parented to this
   # shell would keep a CI job waiting on the process tree
