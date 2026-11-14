@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import getfit  # noqa: E402
+import muscles  # noqa: E402
 
 BASE = Path(__file__).resolve().parent
 
@@ -34,6 +35,16 @@ def _slug(name: str, taken: set[str]) -> str:
         slug = f"{base}-{i}"
         i += 1
     return slug
+
+
+def _form_url(value, name: str) -> str | None:
+    """A form article is a link or nothing — never a guess."""
+    url = str(value or "").strip()[:500]
+    if not url:
+        return None
+    if not re.fullmatch(r"https?://[^\s]+", url):
+        raise ValueError(f"{name}: the form article must be an http(s) link")
+    return url
 
 
 def validate(raw: dict) -> dict:
@@ -78,7 +89,8 @@ def validate(raw: dict) -> dict:
             maximum = int(maximum)
             if maximum < minimum:
                 raise ValueError(f"{name}: maximum must be >= minimum")
-        exercises.append({"id": ex_id, "name": name, "min": minimum, "max": maximum})
+        exercises.append({"id": ex_id, "name": name, "min": minimum, "max": maximum,
+                          "form_url": _form_url(item.get("form_url"), name)})
 
     # last exercise has no overflow target, so it is uncapped by definition
     exercises[-1]["max"] = None
@@ -90,6 +102,77 @@ def validate(raw: dict) -> dict:
         "quiet_end": raw.get("quiet_end", "07:00"),
         "exercises": exercises,
     }
+
+
+def validate_checkin(raw: dict) -> dict:
+    """Clamp a questionnaire into something the model can trust.
+
+    Every field is optional except `kind`; the model degrades gracefully when
+    an answer is missing, and a partial answer is better than no answer.
+    """
+    payload = dict(raw)
+    kind = str(payload.get("kind") or "").strip()
+    if kind not in ("gate", "post"):
+        raise ValueError("kind must be 'gate' or 'post'")
+    payload["kind"] = kind
+
+    for key in ("stress", "fatigue", "soreness", "prs", "srpe", "rir", "reps"):
+        value = payload.get(key)
+        if value in (None, "", "null"):
+            payload.pop(key, None)
+            continue
+        try:
+            payload[key] = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} must be a number") from exc
+
+    # sleep is hours, not a 1-5 rating
+    sleep = payload.get("sleep")
+    if sleep in (None, "", "null"):
+        payload.pop("sleep", None)
+    else:
+        try:
+            payload["sleep"] = round(float(sleep) * 2) / 2
+        except (TypeError, ValueError) as exc:
+            raise ValueError("sleep must be hours") from exc
+        if not 0 <= payload["sleep"] <= 14:
+            raise ValueError("sleep must be 0..14 hours")
+
+    for key in ("stress", "fatigue", "soreness"):
+        if payload.get(key) is not None and not 1 <= payload[key] <= 5:
+            raise ValueError(f"{key} must be 1..5")
+    if payload.get("prs") is not None and not 0 <= payload["prs"] <= 10:
+        raise ValueError("prs must be 0..10")
+    if payload.get("srpe") is not None and not 0 <= payload["srpe"] <= 10:
+        raise ValueError("srpe must be 0..10")
+    if payload.get("rir") is not None and not 0 <= payload["rir"] <= 3:
+        raise ValueError("rir must be 0..3")
+
+    stopper = payload.get("stopper")
+    if stopper not in (None, "", "muscle", "breathing", "joints", "boredom"):
+        raise ValueError("stopper must be muscle, breathing, joints or boredom")
+
+    per_muscle = payload.get("muscle_soreness") or {}
+    if not isinstance(per_muscle, dict):
+        raise ValueError("muscle_soreness must be an object of slug: 1..5")
+    clean = {}
+    for slug, value in per_muscle.items():
+        if str(slug) not in muscles.MUSCLE_NAME:
+            raise ValueError(f"unknown muscle {slug!r}")
+        try:
+            n = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{slug}: soreness must be 1..5") from exc
+        if not 1 <= n <= 5:
+            raise ValueError(f"{slug}: soreness must be 1..5")
+        clean[str(slug)] = n
+    payload["muscle_soreness"] = clean
+
+    if kind == "post" and not payload.get("round_key"):
+        raise ValueError("a post-set check-in needs the round_key")
+    if payload.get("pain_where") and payload["pain_where"] not in muscles.MUSCLE_NAME:
+        raise ValueError("pain_where must be a muscle slug")
+    return payload
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -146,8 +229,27 @@ class Handler(SimpleHTTPRequestHandler):
                                datetime.now(timezone.utc).isoformat()})
 
         if route == "/api/confirm":
-            rc = getfit.cmd_confirm(source="web")
-            return self._json({"ok": rc == 0}, 200 if rc == 0 else 409)
+            rc, receipt = getfit.confirm(source="web")
+            return self._json({"ok": rc == 0, "receipt": receipt},
+                              200 if rc == 0 else 409)
+
+        if route == "/api/checkin":
+            try:
+                clean = validate_checkin(raw.get("checkin", raw))
+            except (ValueError, TypeError) as exc:
+                return self._json({"ok": False, "error": str(exc)}, 400)
+            db = getfit.connect()
+            try:
+                getfit.init_db(db)
+                settings = getfit.load_settings(db)
+                result = muscles.record_checkin(
+                    db, clean, window_minutes=int(settings.get("response_minutes", 10)),
+                    tz=getfit.tz_of(settings))
+            except ValueError as exc:
+                return self._json({"ok": False, "error": str(exc)}, getattr(exc, "code", 400))
+            finally:
+                db.close()
+            return self._json(result)
 
         return self._json({"ok": False, "error": "not found"}, 404)
 

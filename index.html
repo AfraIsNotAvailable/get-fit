@@ -9,13 +9,13 @@
   :root{
     --paper:#faf9f6; --ink:#191917; --muted:#5f5d57; --faint:#7d7a72;
     --line:#dcd9d2; --line2:#b9b5ab; --accent:#8d2f1b; --field:#fffefb;
-    --cal-empty:#e7e4dc;
+    --cal-empty:#e7e4dc; --scrim:rgba(25,25,23,.32);
   }
   @media (prefers-color-scheme: dark){
     :root{
       --paper:#141413; --ink:#e9e6df; --muted:#a8a49a; --faint:#89857c;
       --line:#2d2c28; --line2:#43413b; --accent:#d07a63; --field:#1a1a18;
-      --cal-empty:#232220;
+      --cal-empty:#232220; --scrim:rgba(0,0,0,.55);
     }
   }
   *{box-sizing:border-box; border-radius:0}
@@ -46,20 +46,33 @@
 
   /* status band */
   .band{display:grid; grid-template-columns:1.05fr 1fr; border-top:1px solid var(--line2); border-bottom:1px solid var(--line); margin-bottom:36px}
-  .cell{padding:18px 0 20px}
+  .cell{padding:18px 26px 20px 0}
   .cell + .cell{border-left:1px solid var(--line); padding-left:26px}
   .chead{display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:14px}
   .chead .tick{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; letter-spacing:.04em}
   .clock{font-size:56px; font-weight:400; letter-spacing:-.04em; line-height:1; font-variant-numeric:tabular-nums}
+  .clockrow{display:flex; align-items:flex-end; justify-content:space-between; gap:16px}
+  .mark{appearance:none; background:none; border:1px solid var(--line2); color:var(--ink);
+        font:inherit; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; font-weight:600;
+        padding:8px 11px; cursor:pointer; margin-bottom:5px; white-space:nowrap; line-height:1}
+  .mark:hover:not(:disabled){border-color:var(--ink)}
+  .mark:disabled{opacity:.32; cursor:default}
   .track{height:2px; background:var(--line); margin:16px 0 10px; position:relative; overflow:hidden}
   .track span{position:absolute; inset:0 auto 0 0; background:var(--ink); width:0}
   .cmeta{font-size:13px; color:var(--muted); line-height:1.6}
   .cmeta b{color:var(--ink); font-weight:500}
 
   .now{min-height:92px; display:flex; flex-direction:column; justify-content:space-between; gap:10px}
-  .now .set{font-size:17px; line-height:1.5}
-  .now .set span{display:inline-block; margin-right:18px; white-space:nowrap}
-  .now .set b{font-weight:600; font-variant-numeric:tabular-nums}
+  .now .set{font-size:17px; line-height:1.45}
+  .now .set .item{display:block; margin:0 0 3px}
+  .now .set b{font-weight:600; font-variant-numeric:tabular-nums; margin-right:2px}
+  .now .set a.ex{color:inherit; text-decoration:none; border-bottom:1px solid var(--line2)}
+  .now .set a.ex:hover{border-bottom-color:var(--ink)}
+  .now .set .ex.missing{color:var(--accent); border-bottom:1px dotted var(--accent);
+                        cursor:help; position:relative}
+  .now .set .ex.missing:hover::after{content:attr(data-warn); position:absolute; left:0; bottom:150%;
+                        white-space:nowrap; background:var(--ink); color:var(--paper); font-size:11px;
+                        letter-spacing:.02em; padding:5px 8px; z-index:6}
   .now .idle{color:var(--muted); font-size:15px}
   .now .status{color:var(--muted)}
   .cell.live .status{color:var(--accent)}
@@ -79,6 +92,83 @@
   .cal-legend canvas{display:block; width:11px; height:11px}
 
   .gone{color:var(--faint); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; margin-left:8px}
+
+  /* muscle state */
+  .muscles{display:grid; grid-template-columns:1fr 1fr; column-gap:38px}
+  .mrow2{display:grid; grid-template-columns:84px minmax(0,1fr) 26px; gap:10px; align-items:center;
+         padding:6px 0; border-top:1px solid var(--line); font-size:12px}
+  .muscles .mrow2:nth-child(-n+2){border-top:0}
+  .mrow2 .mn{color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .mrow2 .mbar{position:relative; height:2px; background:var(--line); display:block}
+  .mrow2 .mbar i{position:absolute; inset:0 auto 0 0; background:var(--ink); display:block}
+  .mrow2 .mbar b{position:absolute; top:-3px; bottom:-3px; width:1px; background:var(--line2); left:var(--stop,80%)}
+  .mrow2 .mv{text-align:right; color:var(--muted); font-variant-numeric:tabular-nums}
+  .mrow2.zero{opacity:.38}
+  .mrow2.warm .mn,.mrow2.warm .mv{color:var(--ink)}
+  .mrow2.shut .mbar i{background:var(--accent)}
+  .mrow2.shut .mv{color:var(--accent)}
+
+  /* muscle atlas */
+  .mwrap{display:grid; grid-template-columns:minmax(0,1fr) 148px; gap:30px; align-items:start}
+  .body{margin:0; position:sticky; top:24px; padding-top:15px}
+  .body svg{display:block; width:100%; height:auto}
+  .body svg [id]{transition:fill .1s linear}
+  .body svg [id].on,.body svg [id].on *{fill:var(--accent) !important}
+  .body.pending #bodyart{opacity:.45}
+  .body figcaption{font-size:9px; letter-spacing:.09em; text-transform:uppercase; color:var(--faint);
+                   margin-top:9px; line-height:1.7}
+
+  /* profile */
+  .prow{display:grid; grid-template-columns:96px 58px minmax(0,1fr); gap:12px; align-items:center;
+        padding:6px 0; border-top:1px solid var(--line); font-size:12px}
+  .prow .pl{color:var(--muted)}
+  .prow .pv{color:var(--ink); font-variant-numeric:tabular-nums}
+  .prow .pn{color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums}
+  .spark{display:flex; gap:2px; align-items:flex-end; height:20px}
+  .spark i{display:block; width:3px; background:var(--line2); min-height:2px}
+
+  /* check-in */
+  .modal{position:fixed; inset:0; background:var(--scrim); display:flex; align-items:flex-start;
+         justify-content:center; padding:56px 20px; z-index:20; overflow:auto}
+  .modal[hidden]{display:none}
+  .sheet{background:var(--paper); border:1px solid var(--line2); width:100%; max-width:560px;
+         padding:20px 24px 20px}
+  .sheet-head{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+              padding-bottom:10px; border-bottom:1px solid var(--line2)}
+  .sheet-head .right{display:flex; align-items:baseline; gap:14px}
+  .sheet .x{appearance:none; background:none; border:0; font:inherit; font-size:18px; line-height:1;
+            color:var(--muted); cursor:pointer; padding:0}
+  .sheet .x:hover{color:var(--ink)}
+  .sheet-set{font-size:13px; color:var(--muted); padding:10px 0 0; font-variant-numeric:tabular-nums}
+  .q{display:grid; grid-template-columns:126px minmax(0,1fr); gap:14px; align-items:center;
+     padding:7px 0; border-top:1px solid var(--line)}
+  .q .qt{font-size:12.5px; color:var(--muted)}
+  .q .qt[data-help]{position:relative; cursor:help; border-bottom:1px dotted var(--line2)}
+  .q .qt[data-help]::after{
+    content:attr(data-help); position:absolute; left:0; top:100%; margin-top:7px; width:264px;
+    background:var(--ink); color:var(--paper); font-size:11.5px; line-height:1.55; letter-spacing:0;
+    text-transform:none; font-weight:400; padding:8px 10px; opacity:0; visibility:hidden;
+    transition:opacity .12s ease .7s, visibility 0s linear .7s; z-index:9; pointer-events:none}
+  .q .qt[data-help]:hover::after{opacity:1; visibility:visible; transition-delay:.7s,0s}
+  .pick.num{width:86px}
+  .qin{display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0}
+  .seg{display:flex; flex-wrap:wrap}
+  .seg button{appearance:none; background:none; border:1px solid var(--line); border-right:0;
+              min-width:27px; height:25px; padding:0 5px; font:inherit; font-size:11.5px;
+              color:var(--muted); font-variant-numeric:tabular-nums; cursor:pointer; line-height:1}
+  .seg button:last-child{border-right:1px solid var(--line)}
+  .seg button:hover{border-color:var(--line2); color:var(--ink)}
+  .seg button.on{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+  .qfoot{display:flex; align-items:center; gap:16px; padding-top:14px; margin-top:2px;
+         border-top:1px solid var(--line2)}
+  .submit{appearance:none; border:0; background:var(--ink); color:var(--paper); padding:9px 16px;
+          font:inherit; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+          font-weight:600; cursor:pointer}
+  .submit[disabled]{opacity:.35; cursor:default}
+  .qmsg{font-size:12px; color:var(--accent)}
+  .pick{appearance:none; background:var(--field); color:var(--ink); border:1px solid var(--line);
+        font:inherit; font-size:12px; padding:0 8px; height:25px; min-width:104px}
+  .pick:has(option:checked[value=""]){color:var(--muted)}
 
   /* recent */
   .rrow{display:grid; grid-template-columns:88px 1fr auto; gap:14px; align-items:baseline; padding:8px 0; border-top:1px solid var(--line)}
@@ -100,11 +190,15 @@
   .hero-sub{color:var(--muted); font-size:13.5px}
   .hero-sub b{color:var(--ink); font-weight:500}
   .hero-ex{border-left:1px solid var(--line); padding-left:34px; padding-bottom:31px; min-width:0; display:flex; align-items:flex-end}
-  .exscroll{display:flex; gap:38px; overflow-x:auto; overflow-y:hidden; width:100%; align-items:flex-end;
+  .exscroll{display:flex; gap:0; overflow-x:auto; overflow-y:hidden; width:100%; align-items:flex-end;
             scrollbar-width:none}
-  .excell{flex:0 0 auto; display:flex; flex-direction:column; gap:10px}
-  .excell .nm{font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--faint); font-weight:600}
-  .excell .num{font-size:104px; line-height:.9; letter-spacing:-.05em; font-variant-numeric:tabular-nums}
+  .excell{flex:0 0 224px; display:flex; flex-direction:column; gap:10px;
+          padding-left:26px; border-left:1px solid var(--line)}
+  .excell:first-child{padding-left:0; border-left-color:transparent}
+  .excell .nm{font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--faint);
+              font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .excell .num{font-size:72px; line-height:.9; letter-spacing:-.04em; font-variant-numeric:tabular-nums;
+               white-space:nowrap}
 
   /* dashboard grid */
   .dash{display:grid; grid-template-columns:minmax(0,1fr) 196px; gap:38px; align-items:start}
@@ -151,11 +245,17 @@
 
   @media (max-width:640px){
     .band{grid-template-columns:1fr}
+    .cell{padding-right:0}
     .cell + .cell{border-left:none; border-top:1px solid var(--line); padding-left:0}
     .clock{font-size:46px}
     .stamp .tz{display:none}
     .stamp{font-size:10px}
     .rrow{grid-template-columns:78px 1fr auto; gap:10px}
+    .muscles{grid-template-columns:1fr; column-gap:0}
+    .muscles .mrow2:nth-child(2){border-top:1px solid var(--line)}
+    .mwrap{grid-template-columns:1fr}
+    .body{display:none}
+    .q{grid-template-columns:1fr; gap:6px; align-items:start}
   }
 </style>
 </head>
@@ -191,19 +291,52 @@
         <span class="label" id="nextLabel">Next set</span>
         <span class="label" id="nextState">scheduled</span>
       </div>
-      <div class="clock" id="nextTimer">--:--</div>
+      <div class="clockrow">
+        <div class="clock" id="nextTimer">--:--</div>
+        <button class="mark" id="markDone" type="button" disabled>Mark done</button>
+      </div>
       <div class="track"><span id="trackFill"></span></div>
-      <div class="cmeta"><b id="preview">—</b><br><span id="nextAt">—</span></div>
+      <div class="cmeta"><span id="nextAt">—</span></div>
     </div>
     <div class="cell now" id="nowCell">
       <div>
         <div class="chead">
-          <span class="label status" id="nowStatus">Now</span>
+          <span class="label status" id="nowStatus">Assignment</span>
           <span class="tick" id="nowTick"></span>
         </div>
-        <div id="nowSet"><span class="idle">Nothing on the clock.</span></div>
+        <div id="nowSet"><span class="idle">Nothing scheduled.</span></div>
       </div>
     </div>
+  </section>
+
+  <section class="block" id="checkinBlock">
+    <div class="block-head">
+      <span class="label" id="qTitle">Check-in</span>
+      <span class="label" id="qReady">—</span>
+    </div>
+    <div id="checkin"></div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <span class="label">Muscles</span>
+      <span class="label">stop 80</span>
+    </div>
+    <div class="mwrap">
+      <div class="muscles" id="muscles"></div>
+      <figure class="body" id="bodyfig">
+        <div id="bodyart"></div>
+        <figcaption>Art: Ryan Graves · CC BY 4.0</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <span class="label">Profile</span>
+      <span class="label" id="calNote">—</span>
+    </div>
+    <div id="prof"></div>
   </section>
 
   <section class="block">
@@ -240,8 +373,22 @@
 
   <footer>
     No sets between <span id="footQuiet">23:00 and 07:00</span>, and a penalty earned at night is still there in the morning.
-    Answering after the window logs the set but adds two push-ups instead of one.
+    Answering after the window logs the set but adds two reps instead of one.
   </footer>
+</div>
+
+<div class="modal" id="cm" hidden>
+  <div class="sheet">
+    <div class="sheet-head">
+      <span class="label">After the set</span>
+      <span class="right">
+        <span class="label" id="cmLeft">--:--</span>
+        <button class="x" id="cmClose" type="button" aria-label="Close">×</button>
+      </span>
+    </div>
+    <div class="sheet-set" id="cmSet"></div>
+    <div id="cmBody"></div>
+  </div>
 </div>
 
 <script>
@@ -259,6 +406,16 @@ const fmtClock = (s) => {
 const serverNow = () => Date.now() + clockOffset;
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString();
+
+// An exercise in the assignment: a link to how to do it, or a red flag saying
+// nobody has vouched for one yet. A wrong article is worse than a missing one.
+function exLink(e) {
+  const url = String(e.form_url || '').trim();
+  if (url) {
+    return `<a class="ex" href="${esc(url)}" target="_blank" rel="noopener">${esc(e.name)}</a>`;
+  }
+  return `<span class="ex missing" data-warn="Needs a form article — add one in Settings">${esc(e.name)}</span>`;
+}
 
 let shownTotal = null;
 function animateTotal(n) {
@@ -327,35 +484,30 @@ function render() {
   const pending = !!(v.current && v.current.status === 'pending');
   if (pending) {
     $('nextLabel').textContent = 'Round ends in';
-    $('nextState').textContent = 'answer on Telegram';
-    $('preview').textContent = 'Log it to start the next 90 minute clock';
+    $('nextState').textContent = 'not logged';
     $('nextAt').textContent = 'sent ' + (v.current.local_sent || '') + ', window ' + s.response_minutes + ' min';
   } else {
     $('nextLabel').textContent = 'Next set in';
     const bonus = v.state.bonus || 0;
     $('nextState').textContent = v.next_set && v.next_set.deferred ? 'quiet hours'
       : bonus ? `stack plus ${bonus}` : 'base stack';
-    $('preview').textContent = v.preview.length
-      ? v.preview.map(p => `${p.name} ${p.reps}`).join(' · ')
-      : '—';
     $('nextAt').textContent = v.next_set
       ? (v.next_set.deferred ? `held until ${v.next_set.local}` : `lands at ${v.next_set.local}`)
       : 'not scheduled';
   }
 
   const cur = v.current;
-  $('nowCell').classList.toggle('live', !!cur && cur.status === 'pending');
-  if (!cur) {
-    $('nowStatus').textContent = 'Now';
-    $('nowSet').innerHTML = '<span class="idle">Nothing on the clock.</span>';
-    $('nowTick').textContent = '';
-  } else {
-    const words = { pending: 'On the clock', missed: 'Missed', done: 'Logged', late: 'Logged late' };
-    $('nowStatus').textContent = words[cur.status] || cur.status;
-    $('nowSet').innerHTML = '<div class="set">' + cur.exercises
-      .map(e => `<span><b>${e.reps}</b> ${esc(e.name)}</span>`).join('') + '</div>';
-    $('nowTick').textContent = 'sent ' + (cur.local_sent || '');
-  }
+  const live = !!(cur && cur.status === 'pending');
+  const mark = $('markDone');
+  if (mark) mark.disabled = !(cur && (cur.status === 'pending' || cur.status === 'missed'));
+  const items = live ? (cur.exercises || []) : (v.preview || []);
+  $('nowCell').classList.toggle('live', live);
+  $('nowStatus').textContent = live ? 'On the clock' : 'Assignment';
+  $('nowTick').textContent = live ? ('sent ' + (cur.local_sent || ''))
+    : (v.next_set ? 'next ' + v.next_set.local : '');
+  $('nowSet').innerHTML = items.length
+    ? '<div class="set">' + items.map(e => `<span class="item"><b>${e.reps}</b> ${exLink(e)}</span>`).join('') + '</div>'
+    : '<span class="idle">Nothing scheduled.</span>';
 
   const rows = v.totals.filter(t => t.id !== '_summary');
   $('heroExercises').innerHTML = rows.length ? rows.map(t => `
@@ -375,7 +527,333 @@ function render() {
   }).join('') : '<div class="empty">Nothing yet. The first set will show up here once it lands.</div>';
 
   renderCalendar(v.calendar, Math.max(1, (v.months.rounds_per_day || 1) * (v.months.base_reps || 1)));
+  renderMuscles(v);
+  renderProfile(v);
+  renderCheckin(v);
   tickClocks();
+}
+
+/* ------------------------------ profile ------------------------------ */
+function renderProfile(v) {
+  const p = {};
+  (v.profile || []).forEach((r) => { p[r.key] = r; });
+  const cal = v.calibration || {};
+  const series = cal.series || [];
+  $('calNote').textContent = cal.n ? `${cal.n} observations` : 'no answers yet';
+  const max = Math.max(1, ...series.map((s) => s.error));
+  const spark = series.map((s) => `<i style="height:${Math.max(8, (s.error / max) * 100)}%"></i>`).join('');
+  const rows = [
+    ['Recovery', p.wear_half_life, ' h'],
+    ['Readiness', p.readiness_influence, ''],
+    ['Ceiling', p.stop_base, ''],
+  ];
+  $('prof').innerHTML = rows.filter((r) => r[1]).map(([label, r, unit]) => `
+    <div class="prow">
+      <span class="pl">${label}</span>
+      <span class="pv">${r.value}${unit}</span>
+      <span class="pn">${r.fitted ? r.n + ' obs' : 'prior'}</span>
+    </div>`).join('')
+    + `<div class="prow">
+         <span class="pl">Error</span>
+         <span class="pv">${cal.mae == null ? '—' : cal.mae}</span>
+         <span class="spark">${spark}</span>
+       </div>`;
+}
+
+/* ------------------------------ muscles ------------------------------ */
+function renderMuscles(v) {
+  const ready = (v.readiness && v.readiness.score != null) ? v.readiness.score : 0.7;
+  const list = (v.muscles || []).slice().sort((a, b) => a.sort - b.sort);
+  $('muscles').innerHTML = list.map(m => {
+    const eff = Math.max(30, m.stop_at - (1 - ready) * 20);
+    const cls = ['mrow2'];
+    if (m.load < 0.5) cls.push('zero'); else if (m.load >= 5) cls.push('warm');
+    if (m.resting || m.load >= eff) cls.push('shut');
+    return `<div class="${cls.join(' ')}" data-m="${m.slug}" title="${esc(m.name)} · wear ${m.wear} · soreness ${m.soreness}">`
+      + `<span class="mn">${esc(m.name)}</span>`
+      + `<span class="mbar" style="--stop:${eff}%"><i style="width:${Math.min(100, m.load)}%"></i><b></b></span>`
+      + `<span class="mv">${Math.round(m.load)}</span></div>`;
+  }).join('');
+}
+
+/* ------------------------------ muscle atlas ------------------------------
+   Artwork: kit-g/flutter-body-atlas, based on work by Ryan Graves, CC BY 4.0.
+   Vendored unmodified in art/ — see art/CREDITS.md. Three groups are missing
+   from the atlas (serratus, lower back, hip flexors) and stay marked pending;
+   no substitute is drawn by hand. */
+const ART = { front: null, back: null };
+const obliques = Array.from({ length: 8 }, (_, i) =>
+  [`external_oblique_${i + 1}_l`, `external_oblique_${i + 1}_r`]).flat();
+const MUSCLE_ART = {
+  chest: { view: 'front', ids: ['pectoralis_major_l', 'pectoralis_major_r'] },
+  'anterior-deltoid': { view: 'front', ids: ['anterior_deltoid_l', 'anterior_deltoid_r'] },
+  'lateral-deltoid': { view: 'front', ids: ['lateral_deltoid_l', 'lateral_deltoid_r'] },
+  'posterior-deltoid': { view: 'back', ids: ['posterior_deltoid_l', 'posterior_deltoid_r'] },
+  triceps: { view: 'back', ids: ['triceps_brachii_caput_longum_l', 'triceps_brachii_caput_longum_r',
+    'triceps_brachii_caput_laterale_l', 'triceps_brachii_caput_laterale_r',
+    'triceps_brachii_caput_mediale_l', 'triceps_brachii_caput_mediale_r'] },
+  biceps: { view: 'front', ids: ['biceps_brachii_caput_longum_l', 'biceps_brachii_caput_longum_r',
+    'biceps_brachii_caput_breve_l', 'biceps_brachii_caput_breve_r'] },
+  forearms: { view: 'front', ids: ['brachioradialis_l', 'brachioradialis_r',
+    'flexor_carpi_radialis_l', 'flexor_carpi_radialis_r', 'palmaris_longus_l', 'palmaris_longus_r',
+    'pronator_teres_l', 'pronator_teres_r', 'flexor_digitorum_superficialis_l',
+    'flexor_digitorum_superficialis_r'] },
+  traps: { view: 'back', ids: ['trapezius_upper_l', 'trapezius_upper_r'] },
+  lats: { view: 'back', ids: ['latissimus_dorsi_l', 'latissimus_dorsi_r'] },
+  'mid-back': { view: 'back', ids: ['trapezius_middle_l', 'trapezius_middle_r',
+    'trapezius_lower_l', 'trapezius_lower_r', 'infraspinatus_l', 'infraspinatus_r'] },
+  abs: { view: 'front', ids: ['rectus_abdominis_1', 'rectus_abdominis_2_l', 'rectus_abdominis_2_r',
+    'rectus_abdominis_3_l', 'rectus_abdominis_3_r', 'rectus_abdominis_4_l', 'rectus_abdominis_4_r'] },
+  obliques: { view: 'front', ids: obliques },
+  glutes: { view: 'back', ids: ['gluteus_maximus_l', 'gluteus_maximus_r'] },
+  quads: { view: 'front', ids: ['rectus_femoris_l', 'rectus_femoris_r', 'vastus_lateralis_l',
+    'vastus_lateralis_r', 'vastus_medialis_l', 'vastus_medialis_r', 'sartorius_l', 'sartorius_r'] },
+  hamstrings: { view: 'back', ids: ['biceps_femoris_l', 'biceps_femoris_r', 'semitendinosus_l',
+    'semitendinosus_r', 'semimembranosus_1_l', 'semimembranosus_1_r',
+    'semimembranosus_2_l', 'semimembranosus_2_r'] },
+  adductors: { view: 'front', ids: ['adductor_longus_l', 'adductor_longus_r', 'adductor_magnus_l',
+    'adductor_magnus_r', 'gracilis_l', 'gracilis_r', 'pectineus_l', 'pectineus_r'] },
+  abductors: { view: 'front', ids: ['gluteus_medius_2_l', 'gluteus_medius_2_r'] },
+  calves: { view: 'front', ids: ['gastrocnemius_l', 'gastrocnemius_r', 'tibialis_anterior_l',
+    'tibialis_anterior_r', 'fibularis_longus_l', 'fibularis_longus_r'] },
+  neck: { view: 'front', ids: ['sternocleidomastoid_l', 'sternocleidomastoid_r', 'platysma'] },
+  // no artwork in this atlas yet — pending a dataset that includes them
+  'serratus-anterior': null, 'lower-back': null, 'hip-flexors': null,
+};
+
+async function ensureView(view) {
+  if (ART[view]) return ART[view];
+  try {
+    const r = await fetch(`/art/muscle-${view}.svg`, { cache: 'force-cache' });
+    ART[view] = await r.text();
+  } catch (e) {
+    ART[view] = '';
+  }
+  return ART[view];
+}
+
+async function showMuscle(slug) {
+  const fig = $('bodyfig');
+  const art = slug ? MUSCLE_ART[slug] : null;
+  const view = (art && art.view) || 'front';
+  const svg = await ensureView(view);
+  const box = $('bodyart');
+  if (box.dataset.view !== view) {
+    box.innerHTML = svg || '';
+    box.dataset.view = view;
+  }
+  box.querySelectorAll('.on').forEach((el) => el.classList.remove('on'));
+  if (art) {
+    art.ids.forEach((id) => {
+      const el = box.querySelector('#' + CSS.escape(id));
+      if (el) el.classList.add('on');
+    });
+  }
+  fig.classList.toggle('pending', !!slug && !art);
+}
+
+$('muscles').addEventListener('mouseover', (e) => {
+  const row = e.target.closest('[data-m]');
+  if (row) showMuscle(row.dataset.m);
+});
+$('muscles').addEventListener('mouseleave', () => showMuscle(null));
+showMuscle(null);
+
+/* ------------------------------ check-in ------------------------------ */
+// The after-set questionnaire is a measurement, not a form: it lives in a
+// sheet that opens once, inside the 10-minute window after the set, and the
+// server refuses it after that or after it has been answered once.
+const CHECK = { sig: '', kind: '', roundKey: '', answers: {}, expires: 0 };
+const nums = (key, from, to) => `<span class="seg" data-q="${key}">`
+  + Array.from({ length: to - from + 1 }, (_, i) => from + i)
+    .map(n => `<button type="button" data-v="${n}">${n}</button>`).join('')
+  + '</span>';
+const opts = (key, pairs) => `<span class="seg" data-q="${key}">`
+  + pairs.map(([v, t]) => `<button type="button" data-v="${v}">${t}</button>`).join('') + '</span>';
+const qrow = (label, inner, help) => `<div class="q"><span class="qt"`
+  + (help ? ` data-help="${esc(help)}"` : '')
+  + `>${label}</span><span class="qin">${inner}</span></div>`;
+const foot = () => '<div class="qfoot"><button class="submit" id="qSend" type="button">Save</button>'
+  + '<span class="qmsg" id="qmsg"></span></div>';
+
+function openSheet() { $('cm').hidden = false; }
+function closeSheet() { $('cm').hidden = true; }
+
+function buildPost(round) {
+  $('cmSet').textContent = round.exercises.map(e => `${e.reps} ${e.name}`).join(' · ');
+  let h = qrow('How hard (0–10)', nums('srpe', 0, 10));
+  h += qrow('Left in reserve', opts('rir', [[0, '0'], [1, '1'], [2, '2'], [3, '3+']]));
+  h += qrow('What stopped you', opts('stopper', [['muscle', 'muscle'], ['breathing', 'breath'],
+    ['joints', 'joints'], ['boredom', 'bore']]));
+  round.muscles.forEach(m => { h += qrow(esc(m.name), nums('m:' + m.slug, 1, 5)); });
+  $('cmBody').innerHTML = h + foot();
+}
+
+const HELP = {
+  fatigue: 'Whole-body tiredness, not muscle soreness — ask whether a normal day feels like effort. '
+    + 'Feeds readiness, which lowers every muscle\'s ceiling today.',
+  soreness: 'Tenderness in the muscles you trained, when you move or press them. Rate the worst area. '
+    + 'Sets those muscles\' soreness and holds them back near the stop line.',
+  prs: 'How ready you feel to train again, all things considered: sleep, energy, aches. '
+    + '0 wrecked, 10 fresh. Half of readiness, so it moves today\'s ceiling up or down.',
+};
+const sleepField = () =>
+  '<input class="pick num" type="number" id="sleepHours" min="0" max="14" step="0.5" placeholder="0–14">';
+
+function buildGate(v) {
+  const ci = v.checkin || {};
+  const done = ci.gate_answered || {};
+  $('qTitle').textContent = 'Check-in';
+  const open = ['sleep', 'stress', 'fatigue', 'soreness', 'prs', 'pain'].filter((k) => done[k] === undefined);
+  if (!open.length) {
+    $('checkinBlock').hidden = true;
+    $('checkin').innerHTML = '';
+    return;
+  }
+  const where = '<select class="pick" id="painWhere"><option value="">where</option>'
+    + (v.muscles || []).slice().sort((a, b) => a.sort - b.sort)
+      .map((m) => `<option value="${m.slug}">${esc(m.name)}</option>`).join('') + '</select>';
+  let h = '';
+  if (done.sleep === undefined) h += qrow('Sleep, hours', sleepField());
+  if (done.stress === undefined) h += qrow('Stress', nums('stress', 1, 5));
+  if (done.fatigue === undefined) h += qrow('Fatigue', nums('fatigue', 1, 5), HELP.fatigue);
+  if (done.soreness === undefined) h += qrow('Soreness', nums('soreness', 1, 5), HELP.soreness);
+  if (done.prs === undefined) h += qrow('Recovered', nums('prs', 0, 10), HELP.prs);
+  if (done.pain === undefined) h += qrow('Sharp pain', opts('pain', [[0, 'no'], [1, 'yes']]) + where);
+  $('checkin').innerHTML = h + foot();
+}
+
+function renderCheckin(v) {
+  const ci = v.checkin || {};
+  const ready = ci.readiness || v.readiness || {};
+  $('qReady').textContent = (ready.score != null ? Math.round(ready.score * 100) + '% ready' : '')
+    + (ready.stale ? ' · none today' : '');
+
+  const round = (ci.due === 'post' && ci.round && (ci.seconds_left || 0) > 0) ? ci.round : null;
+  const dismissed = round && localStorage.getItem('gf_post_dismissed') === round.round_key;
+
+  if (round && !dismissed) {
+    $('checkinBlock').hidden = true;
+    if (CHECK.sig !== 'post|' + round.round_key) {
+      CHECK.sig = 'post|' + round.round_key;
+      CHECK.kind = 'post';
+      CHECK.roundKey = round.round_key;
+      CHECK.answers = {};
+      CHECK.expires = new Date(ci.expires_at).getTime();
+      buildPost(round);
+    }
+    openSheet();
+    tickSheet();
+    return;
+  }
+
+  closeSheet();
+  if (round) {                       // dismissed: nothing to offer until it shuts
+    $('checkinBlock').hidden = true;
+    return;
+  }
+  $('checkinBlock').hidden = false;
+  const done = Object.keys(ci.gate_answered || {}).sort().join(',');
+  const sig = 'gate|' + done;
+  if (CHECK.sig !== sig) {
+    CHECK.sig = sig;
+    CHECK.kind = 'gate';
+    CHECK.answers = {};
+    buildGate(v);
+  }
+}
+
+function tickSheet() {
+  if ($('cm').hidden) return;
+  const left = (CHECK.expires - serverNow()) / 1000;
+  $('cmLeft').textContent = fmtClock(left);
+  if (left <= 0) {
+    closeSheet();
+    $('checkinBlock').hidden = false;
+    load();
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg button');
+  if (btn) {
+    const seg = btn.parentElement;
+    Array.from(seg.children).forEach(b => b.classList.toggle('on', b === btn));
+    CHECK.answers[seg.dataset.q] = btn.dataset.v;
+    return;
+  }
+  if (e.target.id === 'qSend') sendCheckin();
+});
+
+$('cmClose').addEventListener('click', () => {
+  if (CHECK.roundKey) localStorage.setItem('gf_post_dismissed', CHECK.roundKey);
+  closeSheet();
+  $('checkinBlock').hidden = true;
+});
+
+// The same path the Telegram hook takes — this is a convenience, not a second
+// kind of truth: a click after the window logs the round as late, exactly as a
+// late reply would.
+$('markDone').addEventListener('click', async () => {
+  const btn = $('markDone');
+  btn.disabled = true;
+  btn.textContent = '…';
+  let label = 'Mark done';
+  try {
+    const r = await fetch('/api/confirm', { method: 'POST' });
+    const j = await r.json();
+    label = j.ok ? 'Logged' : 'Nothing to log';
+    btn.textContent = label;
+    await load();
+  } catch (e) {
+    label = 'Failed';
+    btn.textContent = label;
+  }
+  setTimeout(() => { btn.textContent = 'Mark done'; }, 2600);
+});
+
+async function sendCheckin() {
+  const a = CHECK.answers, payload = { kind: CHECK.kind };
+  const n = (k) => (a[k] === undefined ? undefined : Number(a[k]));
+  if (CHECK.kind === 'post') {
+    payload.round_key = CHECK.roundKey;
+    payload.srpe = n('srpe');
+    payload.rir = n('rir');
+    payload.stopper = a.stopper;
+    payload.muscle_soreness = {};
+    Object.keys(a).forEach(k => {
+      if (k.startsWith('m:')) payload.muscle_soreness[k.slice(2)] = Number(a[k]);
+    });
+  } else {
+    const el = $('sleepHours');
+    if (el && el.value !== '') payload.sleep = Number(el.value);
+    payload.stress = n('stress');
+    payload.fatigue = n('fatigue');
+    payload.soreness = n('soreness');
+    payload.prs = n('prs');
+    payload.pain = a.pain === '1';
+    const w = $('painWhere');
+    if (w && w.value) payload.pain_where = w.value;
+  }
+  Object.keys(payload).forEach(k => { if (payload[k] === undefined) delete payload[k]; });
+
+  const btn = $('qSend');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/checkin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkin: payload }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'not saved');
+    CHECK.sig = '';
+    closeSheet();
+    await load();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    const msg = $('qmsg');
+    if (msg) msg.textContent = err.message;
+  }
 }
 
 /* ------------------------------ calendar ------------------------------ */
@@ -530,7 +1008,7 @@ function flashTitle() {
 
 load();
 setInterval(load, 10000);
-setInterval(tickClocks, 1000);
+setInterval(() => { tickClocks(); tickSheet(); }, 1000);
 </script>
 </body>
 </html>

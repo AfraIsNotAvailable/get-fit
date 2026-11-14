@@ -21,6 +21,7 @@ CLI
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -29,6 +30,8 @@ import calendar as calmod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import muscles
 
 BASE = Path(__file__).resolve().parent
 DB_PATH = BASE / "getfit.db"
@@ -120,6 +123,7 @@ def connect() -> sqlite3.Connection:
 
 def init_db(db: sqlite3.Connection) -> None:
     db.executescript(SCHEMA)
+    _ensure_columns(db)
     if not db.execute("SELECT 1 FROM settings WHERE id=1").fetchone():
         s = DEFAULT_SETTINGS
         db.execute(
@@ -138,6 +142,16 @@ def init_db(db: sqlite3.Connection) -> None:
         db.execute("INSERT INTO app_state (id, bonus, next_set_at, created_at) VALUES (1, 0, ?, ?)",
                    (iso(now_utc()), iso(now_utc())))
     db.commit()
+    muscles.seed(db)
+    muscles.backfill(db)
+
+
+def _ensure_columns(db: sqlite3.Connection) -> None:
+    """Add columns that a CREATE TABLE IF NOT EXISTS cannot retrofit."""
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(exercises)")}
+    if "form_url" not in cols:
+        db.execute("ALTER TABLE exercises ADD COLUMN form_url TEXT")
+        db.commit()
 
 
 def now_utc() -> datetime:
@@ -165,9 +179,9 @@ def load_settings(db: sqlite3.Connection) -> dict:
         "quiet_start": row["quiet_start"],
         "quiet_end": row["quiet_end"],
         "exercises": [
-            {"id": e["slug"], "name": e["name"], "min": e["min_reps"],
-             "max": None if pos == len(rows) - 1 else e["max_reps"]}
-            for pos, e in enumerate(rows)
+            {"id": e["slug"], "name": e["name"], "min": e["min_reps"], "max": e["max_reps"],
+             "form_url": e["form_url"]}
+            for e in rows
         ],
     }
 
@@ -194,22 +208,29 @@ def save_settings(db: sqlite3.Connection, cfg: dict) -> dict:
         row = db.execute("SELECT id FROM exercises WHERE slug=?", (slug,)).fetchone() if slug else None
         if row:
             db.execute(
-                "UPDATE exercises SET name=?, min_reps=?, max_reps=?, position=?, active=1, retired_at=NULL WHERE id=?",
+                "UPDATE exercises SET name=?, min_reps=?, max_reps=?, position=?, active=1,"
+                " retired_at=NULL WHERE id=?",
                 (ex["name"], ex["min"], ex["max"], pos, row["id"]),
             )
+            if "form_url" in ex:
+                db.execute("UPDATE exercises SET form_url=? WHERE id=?",
+                           (ex.get("form_url") or None, row["id"]))
             keep.add(slug)
         else:
             slug = slugify(ex["name"], db)
             db.execute(
-                "INSERT INTO exercises (slug, name, min_reps, max_reps, position, active, created_at)"
-                " VALUES (?, ?, ?, ?, ?, 1, ?)",
-                (slug, ex["name"], ex["min"], ex["max"], pos, stamp),
+                "INSERT INTO exercises (slug, name, min_reps, max_reps, position, active,"
+                " created_at, form_url) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                (slug, ex["name"], ex["min"], ex["max"], pos, stamp, ex.get("form_url") or None),
             )
             keep.add(slug)
     for row in db.execute("SELECT slug FROM exercises WHERE active=1").fetchall():
         if row["slug"] not in keep:
             db.execute("UPDATE exercises SET active=0, retired_at=? WHERE slug=?", (stamp, row["slug"]))
     db.commit()
+    # a newly added exercise must arrive with its muscle attribution, or the
+    # fatigue model cannot see it at all
+    muscles.seed_attribution(db)
     return load_settings(db)
 
 
@@ -228,7 +249,10 @@ def last_round(db: sqlite3.Connection) -> dict | None:
     row = db.execute("SELECT * FROM rounds ORDER BY id DESC LIMIT 1").fetchone()
     if not row:
         return None
-    items = db.execute("SELECT * FROM round_items WHERE round_id=? ORDER BY id", (row["id"],)).fetchall()
+    items = db.execute(
+        "SELECT ri.*, e.form_url FROM round_items ri"
+        " LEFT JOIN exercises e ON e.slug = ri.exercise_slug"
+        " WHERE ri.round_id=? ORDER BY ri.id", (row["id"],)).fetchall()
     return {
         "id": row["round_key"],
         "db_id": row["id"],
@@ -237,8 +261,8 @@ def last_round(db: sqlite3.Connection) -> dict | None:
         "status": row["status"],
         "confirmed_at": row["resolved_at"],
         "bonus_applied": row["bonus_applied"],
-        "exercises": [{"id": i["exercise_slug"], "name": i["exercise_name"], "reps": i["reps"]}
-                      for i in items],
+        "exercises": [{"id": i["exercise_slug"], "name": i["exercise_name"], "reps": i["reps"],
+                       "form_url": i["form_url"]} for i in items],
     }
 
 
@@ -285,25 +309,53 @@ def clamp_to_active(dt: datetime, settings: dict) -> datetime:
 
 
 # ---------------------------------------------------------------- stack math
-def compose(settings: dict, bonus: int) -> list[dict]:
-    """Turn (minimums, bonus) into the concrete set for right now."""
-    exercises = settings["exercises"]
+def compose(settings: dict, bonus: int, exercises: list[dict] | None = None) -> list[dict]:
+    """Turn (minimums, bonus) into the concrete set for right now.
+
+    ``exercises`` lets the caller pass a rotated/filtered stack; the bonus
+    cascade is unchanged either way.
+    """
+    exercises = settings["exercises"] if exercises is None else exercises
     out: list[dict] = []
     carry = max(0, int(bonus))
     prev_capped = False
     for idx, ex in enumerate(exercises):
         last = idx == len(exercises) - 1
-        cap = None if last else ex.get("max")
+        # an exercise with no stored max is the overflow sink, wherever the
+        # rotation has put it; the tail is a sink by definition as a fallback
+        cap = None if (last or ex.get("max") is None) else int(ex.get("max"))
         base = int(ex.get("min") or 0)
         if idx > 0 and not prev_capped and carry <= 0:
             break
         asked = base + carry
-        reps = asked if cap is None else min(asked, int(cap))
+        reps = asked if cap is None else min(asked, cap)
         carry = max(0, asked - reps)
-        prev_capped = cap is not None and reps >= int(cap)
+        prev_capped = cap is not None and reps >= cap
         if reps > 0:
-            out.append({"id": ex["id"], "name": ex["name"], "reps": reps})
+            out.append({"id": ex["id"], "name": ex["name"], "reps": reps,
+                        "form_url": ex.get("form_url")})
     return out
+
+
+def last_done_map(db: sqlite3.Connection) -> dict[str, str]:
+    return {row["slug"]: row["t"] for row in db.execute(
+        "SELECT ri.exercise_slug slug, MAX(r.resolved_at) t FROM round_items ri"
+        " JOIN rounds r ON r.id = ri.round_id WHERE r.status IN ('done','late')"
+        " GROUP BY ri.exercise_slug").fetchall() if row["t"]}
+
+
+def last_circle(db: sqlite3.Connection) -> set[str]:
+    """Muscles the most recent performed round loaded — used to force variety."""
+    row = db.execute("SELECT round_key FROM rounds WHERE status IN ('done','late')"
+                     " ORDER BY resolved_at DESC, id DESC LIMIT 1").fetchone()
+    return set(muscles.round_muscles(db, row["round_key"])) if row else set()
+
+
+def plan_round(db: sqlite3.Connection, settings: dict, bonus: int,
+               now: datetime) -> tuple[list[dict], dict]:
+    stack, meta = muscles.plan(db, settings["exercises"], now,
+                               last_done_map(db), last_circle(db), tz_of(settings))
+    return compose(settings, bonus, stack), meta
 
 
 def format_set(rows: list[dict]) -> str:
@@ -311,8 +363,9 @@ def format_set(rows: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------- actions
-def open_round(db: sqlite3.Connection, settings: dict, state: dict, now: datetime) -> dict:
-    rows = compose(settings, state["bonus"])
+def open_round(db: sqlite3.Connection, settings: dict, state: dict, now: datetime,
+               rows: list[dict] | None = None, meta: dict | None = None) -> dict:
+    rows = plan_round(db, settings, state["bonus"], now)[0] if rows is None else rows
     resp = int(settings.get("response_minutes", 10))
     tz = tz_of(settings)
     cur = db.execute(
@@ -357,9 +410,10 @@ def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
     next_at = state["next_set_at"]
     due = (not round_open) and next_at is not None and now >= parse(next_at)
     if due and (force or in_active_window(now, settings)):
-        message = format_set(compose(settings, state["bonus"]))
+        rows, meta = plan_round(db, settings, state["bonus"], now)
+        message = format_set(rows)
         if not dry_run:
-            open_round(db, settings, state, now)
+            open_round(db, settings, state, now, rows, meta)
             db.commit()
 
     db.close()
@@ -368,7 +422,8 @@ def cmd_tick(dry_run: bool = False, force: bool = False) -> int:
     return 0
 
 
-def cmd_confirm(source: str = "") -> int:
+def confirm(source: str = "") -> tuple[int, str]:
+    """Log the open round. Returns (rc, receipt) — rc 3 when nothing is pending."""
     db = connect()
     init_db(db)
     settings = load_settings(db)
@@ -376,28 +431,40 @@ def cmd_confirm(source: str = "") -> int:
     cur = last_round(db)
     if not cur or cur["status"] not in ("pending", "missed"):
         db.close()
-        return 3
+        return 3, ""
 
     now = now_utc()
     late = cur["status"] == "missed" or now > parse(cur["deadline"])
     db.execute("UPDATE rounds SET status=?, resolved_at=?, source=? WHERE id=?",
                ("late" if late else "done", iso(now), source, cur["db_id"]))
+    muscles.accrue(db, cur["id"], cur["exercises"], now)
     state["bonus"] = 2 if late else 0
     close_round(db, settings, state, now)
     db.commit()
 
-    receipt = _receipt(cur, late, state, settings)
+    receipt = _receipt(cur, late, state, settings, db, now)
     db.close()
-    print(receipt)
-    return 0
+    return 0, receipt
 
 
-def _receipt(cur: dict, late: bool, state: dict, settings: dict) -> str:
+def cmd_confirm(source: str = "") -> int:
+    rc, receipt = confirm(source)
+    if receipt:
+        print(receipt)
+    return rc
+
+
+def _receipt(cur: dict, late: bool, state: dict, settings: dict,
+             db: sqlite3.Connection | None = None, now: datetime | None = None) -> str:
     rows = ", ".join(f"{r['reps']} {r['name'].lower()}" for r in cur["exercises"])
     if late:
         out = f"Late, but logged: {rows}.\nReset — next set is +2 push-ups."
     else:
         out = f"Logged: {rows}. Back to base next set."
+    if db is not None:
+        hot = [m for m in muscles.snapshot(db, now or now_utc()) if m["load"] >= 5][:3]
+        if hot:
+            out += "\nWear: " + ", ".join(f"{m['name'].lower()} {round(m['load'])}%" for m in hot) + "."
     if state.get("next_set_at"):
         local = parse(state["next_set_at"]).astimezone(tz_of(settings))
         out += f" Next set {local.strftime('%H:%M')}."
@@ -409,12 +476,182 @@ def cmd_reset(keep_tally: bool) -> int:
     init_db(db)
     db.execute("DELETE FROM round_items")
     db.execute("DELETE FROM rounds")
+    db.execute("DELETE FROM wear_events")
+    db.execute("DELETE FROM checkins")
+    db.execute("UPDATE muscle_state SET wear=0, soreness=0, rest_until=NULL, last_loaded_at=NULL,"
+               " updated_at=?", (iso(now_utc()),))
     db.execute("UPDATE app_state SET bonus=0, next_set_at=? WHERE id=1", (iso(now_utc()),))
     if not keep_tally:
         db.execute("DELETE FROM opening_balance")
     db.commit()
     db.close()
     print("state reset" + (" (tally kept)" if keep_tally else " (tally cleared)"))
+    return 0
+
+
+def cmd_setwear(args: list[str]) -> int:
+    """Pin a muscle's wear by hand — the manual override the model needs.
+
+    ``getfit.py setwear chest=68 triceps=41``. Recorded as an anchor row so the
+    estimate can always be traced back to a human statement rather than an
+    unexplained number.
+    """
+    db = connect()
+    init_db(db)
+    now = now_utc()
+    stamp = iso(now)
+    muscles.decay(db, now)
+    applied = []
+    for arg in args:
+        slug, _, value = arg.partition("=")
+        if slug not in muscles.MUSCLE_NAME or not value:
+            print(f"skipped {arg!r}: expected slug=percent", file=sys.stderr)
+            continue
+        try:
+            pct = float(value)
+        except ValueError:
+            print(f"skipped {arg!r}: not a number", file=sys.stderr)
+            continue
+        db.execute("UPDATE muscle_state SET wear=?, updated_at=? WHERE muscle_slug=?",
+                   (max(0.0, min(muscles.WEAR_CAP, pct)), stamp, slug))
+        applied.append({"muscle": slug, "wear": pct})
+    if not applied:
+        db.close()
+        return 2
+    db.execute("INSERT INTO checkins (kind, at, note) VALUES ('anchor', ?, ?)",
+               (stamp, json.dumps(applied)))
+    db.commit()
+    db.close()
+    print("anchored " + ", ".join(f"{a['muscle']}={a['wear']:g}" for a in applied))
+    return 0
+
+
+def cmd_profile() -> int:
+    db = connect()
+    init_db(db)
+    rows = muscles.profile_rows(db)
+    for row in rows:
+        state = "fitted" if row["fitted"] else "prior"
+        print(f"{row['key']:<20} {row['value']:<9g} prior {row['prior']:<9g} n={row['n']:<4} {state}")
+    cal = muscles.calibration(db)
+    mae = "-" if cal["mae"] is None else f"{cal['mae']} points"
+    print(f"\nmean error           {mae} over {cal['n']} observations")
+    if cal["series"]:
+        print("per check-in         " + " ".join(f"{p['error']:g}" for p in cal["series"]))
+    db.close()
+    return 0
+
+
+def cmd_history(args: list[str]) -> int:
+    db = connect()
+    init_db(db)
+    limit = int(args[0]) if args and args[0].isdigit() else 40
+    rows = muscles.profile_history(db, limit)
+    db.close()
+    if not rows:
+        print("no parameter changes yet")
+        return 0
+    for r in rows:
+        prev = f"{r['previous']:g} → " if r["previous"] is not None else ""
+        print(f"{r['at'][:16].replace('T', ' ')}  {r['key']:<20} {prev}{r['value']:g}"
+              f"  n={r['n']:<4} {r['reason']}")
+    return 0
+
+
+def cmd_refit() -> int:
+    db = connect()
+    init_db(db)
+    summary = muscles.refit(db)
+    db.close()
+    print(f"observations {summary['observations']}")
+    for key in ("wear_half_life", "readiness_influence", "stop_base"):
+        row = summary[key]
+        print(f"{key:<20} {row['value']:<9g} n={row['n']:<4} "
+              + ("fitted" if row["fitted"] else "kept prior"))
+    cal = summary["calibration"]
+    print(f"mean error            {'-' if cal['mae'] is None else cal['mae']}"
+          f" over {cal['n']} observations")
+    return 0
+
+
+def cmd_muscles() -> int:
+    db = connect()
+    init_db(db)
+    now = now_utc()
+    ready = muscles.readiness(db, now, tz_of(load_settings(db)))
+    snap = muscles.snapshot(db, now)
+    print(f"readiness      {ready['score']:.2f}"
+          + ("" if not ready["stale"] else " (no fresh check-in)")
+          + (f"  pain: {ready['pain_where']}" if ready.get("pain") else ""))
+    print(f"{'muscle':<16}{'load':>6}{'wear':>7}{'sore':>7}  stop")
+    for m in snap:
+        if m["load"] < 0.5:
+            continue
+        stop = muscles.effective_stop(m["stop_at"], ready["score"])
+        flag = "  rest" if m["resting"] else ("  STOP" if m["load"] >= stop else "")
+        print(f"{m['name']:<16}{m['load']:>6.0f}{m['wear']:>7.1f}{m['soreness']:>7.1f}"
+              f"{stop:>6.0f}{flag}")
+    quiet = [m["name"] for m in snap if m["load"] < 0.5]
+    if quiet:
+        print("fresh          " + ", ".join(quiet))
+    db.close()
+    return 0
+
+
+def cmd_library() -> int:
+    db = connect()
+    init_db(db)
+    for row in muscles.library_rows(db):
+        print(f"{row['name']}  ({row['slug']})" + ("" if row["attributed"] else "   [NO ATTRIBUTION]"))
+        for m in row["muscles"]:
+            print(f"    {m['role']:<11} {m['name']:<16} w={m['weight']:.2f} k={m['k']:.2f}"
+                  f" exposure={m['exposure']}")
+    missing = muscles.unattributed(db)
+    if missing:
+        print("\nadd attribution for: " + ", ".join(m["name"] for m in missing))
+    db.close()
+    return 0
+
+
+def cmd_checkin(args: list[str]) -> int:
+    payload: dict = {}
+    soreness: dict[str, int] = {}
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--muscle" and i + 1 < len(args):
+            slug, _, value = args[i + 1].partition("=")
+            soreness[slug] = int(value or 3)
+            i += 2
+            continue
+        if arg.startswith("--") and i + 1 < len(args):
+            key = arg[2:]
+            value = args[i + 1]
+            if key == "pain":
+                payload["pain"] = value.lower() in ("1", "true", "yes")
+            elif key in ("kind", "pain_where", "stopper", "round_key"):
+                payload[key] = value
+            else:
+                payload[key] = int(value)
+            i += 2
+            continue
+        i += 1
+    if soreness:
+        payload["muscle_soreness"] = soreness
+    db = connect()
+    init_db(db)
+    settings = load_settings(db)
+    try:
+        result = muscles.record_checkin(db, payload, tz=tz_of(settings))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        db.close()
+        return 2
+    db.close()
+    print(f"{result['kind']} check-in stored"
+          + (f", readiness {result['readiness']:.2f}" if result["readiness"] is not None else ""))
+    for change in result["changes"]:
+        print("  " + json.dumps(change))
     return 0
 
 
@@ -552,6 +789,13 @@ def view() -> dict:
                     "deferred": eff != when, "scheduled": iso(when),
                     "seconds_left": max(0, int((eff - now).total_seconds()))}
 
+    preview, selection = plan_round(db, settings, state["bonus"], now)
+    ready = muscles.readiness(db, now, tz)
+    influence = muscles.profile_get(db, "readiness_influence")
+    muscle_rows = muscles.snapshot(db, now, do_decay=False)
+    for m in muscle_rows:
+        m["stop_effective"] = round(muscles.effective_stop(m["stop_at"], ready["score"], influence), 1)
+
     out = {
         "now": iso(now),
         "now_local": now.astimezone(tz).strftime("%H:%M:%S"),
@@ -566,13 +810,71 @@ def view() -> dict:
         "current": current,
         "round_open": bool(cur and cur["status"] == "pending"),
         "next_set": next_set,
-        "preview": compose(settings, state["bonus"]),
+        "preview": preview,
         "quiet_now": not in_active_window(now, settings),
         "calendar": build_calendar(db, settings, now),
         "months": build_months(db, settings, now),
+        "muscles": muscle_rows,
+        "readiness": ready,
+        "profile": muscles.profile_rows(db),
+        "calibration": muscles.calibration(db),
+        "history": muscles.profile_history(db, 24),
+        "checkin": build_checkin(db, now, ready, settings),
+        "selection": {
+            "deload": selection["deload"],
+            "blocked": selection["blocked"],
+            "ranked": [{"id": r["id"], "name": r["name"], "load": r["hot"],
+                        "why": r["why"], "joined": r["id"] in {p["id"] for p in preview}}
+                       for r in selection["ranked"]],
+        },
+        "unattributed": muscles.unattributed(db),
     }
     db.close()
     return out
+
+
+def build_checkin(db: sqlite3.Connection, now: datetime, ready: dict,
+                  settings: dict) -> dict:
+    """What the dashboard should offer right now.
+
+    The after-set questionnaire is a measurement of a set that just happened:
+    it exists only inside the response window that followed that set, and only
+    until it has been answered once. Outside that, there is nothing to offer
+    but the gate.
+    """
+    window = muscles.post_window(db, now, int(settings.get("response_minutes", 10)))
+    gate = muscles.latest_gate(db)
+    done_today = muscles.gate_today(db, now, tz_of(settings))
+    answered = {k: done_today[k] for k in ("sleep", "stress", "fatigue", "soreness", "prs",
+                                           "pain", "pain_where")
+                if done_today.get(k) is not None}
+    target = None
+    if window:
+        row = window["round"]
+        items = db.execute("SELECT * FROM round_items WHERE round_id=? ORDER BY id",
+                           (row["id"],)).fetchall()
+        seen, hot = set(), []
+        for item in items:
+            for pair in muscles.attribution(db, item["exercise_slug"]):
+                if pair["muscle_slug"] in seen:
+                    continue
+                seen.add(pair["muscle_slug"])
+                hot.append({"slug": pair["muscle_slug"], "name": pair["muscle_name"],
+                            "role": pair["role"]})
+        target = {"round_key": row["round_key"],
+                  "at": row["resolved_at"],
+                  "expires_at": iso(window["expires_at"]),
+                  "seconds_left": window["seconds_left"],
+                  "exercises": [{"name": i["exercise_name"], "reps": i["reps"]} for i in items],
+                  "muscles": hot[:8]}
+    return {"due": "post" if target else "gate",
+            "round": target,
+            "expires_at": target["expires_at"] if target else None,
+            "seconds_left": target["seconds_left"] if target else None,
+            "window_minutes": int(settings.get("response_minutes", 10)),
+            "readiness": ready,
+            "gate_answered": answered,
+            "last_gate": dict(gate) if gate else None}
 
 
 def cmd_status() -> int:
@@ -583,6 +885,12 @@ def cmd_status() -> int:
     print(f"current        {(v['current'] or {}).get('status', 'none')}"
           f" {v['current']['seconds_left'] if v['current'] else ''}")
     print("preview        " + (", ".join(f"{r['name']} {r['reps']}" for r in v["preview"]) or "-"))
+    if v["selection"]["deload"]:
+        print("selection      deload (every group near capacity)")
+    elif v["selection"]["blocked"]:
+        print("blocked        " + ", ".join(f"{b['name']} ({b['why']})" for b in v["selection"]["blocked"]))
+    print(f"readiness      {v['readiness']['score']:.2f}"
+          + (" (no fresh check-in)" if v["readiness"]["stale"] else ""))
     print("totals         " + ", ".join(f"{t['name']}: {t['reps']}" for t in v["totals"][1:]))
     return 0
 
@@ -679,6 +987,20 @@ def main(argv: list[str]) -> int:
         return cmd_report()
     if cmd == "migrate":
         return cmd_migrate()
+    if cmd == "muscles":
+        return cmd_muscles()
+    if cmd == "library":
+        return cmd_library()
+    if cmd == "checkin":
+        return cmd_checkin(args)
+    if cmd == "setwear":
+        return cmd_setwear(args)
+    if cmd == "profile":
+        return cmd_profile()
+    if cmd == "refit":
+        return cmd_refit()
+    if cmd == "history":
+        return cmd_history(args)
     if cmd == "compose":
         bonus = int(args[args.index("--bonus") + 1]) if "--bonus" in args else 0
         db = connect()
@@ -691,4 +1013,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except BrokenPipeError:          # `getfit.py library | head`
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(0)

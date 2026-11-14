@@ -57,6 +57,8 @@
   .ex{padding:9px 0; border-top:1px solid var(--line)}
   .idx{color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums}
   .clab{display:none}
+  .cellname .furl{margin-top:5px; font-size:11.5px; color:var(--muted); font-family:inherit}
+  .cellname .furl::placeholder{color:var(--faint)}
   .tools{display:flex; gap:6px; justify-content:flex-end}
   .icon{
     background:transparent; border:1px solid var(--line2); color:var(--muted);
@@ -191,6 +193,8 @@ function renderEx() {
       <span class="cellname">
         <span class="clab">Exercise</span>
         <input type="text" value="${esc(e.name)}" data-k="name" data-i="${i}" maxlength="40" aria-label="Name">
+        <input type="url" class="furl" value="${esc(e.form_url || '')}" data-k="form_url" data-i="${i}"
+               placeholder="form article URL" aria-label="Form article URL">
       </span>
       <span class="fmin">
         <span class="clab">Minimum</span>
@@ -214,7 +218,8 @@ $('exRows').addEventListener('input', (ev) => {
   const t = ev.target, i = +t.dataset.i, k = t.dataset.k;
   if (!k) return;
   dirty = true;
-  rowsData[i][k] = k === 'name' ? t.value : (t.value === '' ? null : +t.value);
+  rowsData[i][k] = (k === 'name' || k === 'form_url') ? t.value
+    : (t.value === '' ? null : +t.value);
 });
 
 $('exRows').addEventListener('click', (ev) => {
@@ -247,6 +252,7 @@ $('save').addEventListener('click', async () => {
     exercises: rowsData.map(e => ({
       id: e.id, name: e.name, min: +e.min || 0,
       max: e.max === null || e.max === '' ? null : +e.max,
+      form_url: (e.form_url || '').trim() || null,
     })),
   };
   const msg = $('saveMsg');
