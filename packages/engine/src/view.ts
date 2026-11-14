@@ -61,6 +61,14 @@ export interface Dashboard {
   unattributed: { slug: string; name: string }[];
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-11-14" -> "14 Nov": the recent-rounds column, not an ISO date. */
+function dayLabel(dateISO: string): string {
+  const [, month, day] = dateISO.split("-");
+  return `${Number(day)} ${MONTHS[Number(month) - 1] ?? month}`;
+}
+
 export function view(snap: Snapshot, now: Date, opening: Parameters<typeof totals>[1] = []): Dashboard {
   const tz = snap.settings.timezone;
   const totalRows = totals(snap, opening);
@@ -91,7 +99,7 @@ export function view(snap: Snapshot, now: Date, opening: Parameters<typeof total
         status: r.status,
         at: r.resolvedAt ?? r.sentAt,
         local: localHM(sent, tz),
-        day: `${String(localParts(sent, tz).day).padStart(2, "0")} ${localParts(sent, tz).dateISO.slice(5, 7)}`,
+        day: dayLabel(localParts(sent, tz).dateISO),
         exercises: r.items.map((i) => ({ name: i.exerciseName, reps: i.reps })),
       };
     });
@@ -124,6 +132,8 @@ export function view(snap: Snapshot, now: Date, opening: Parameters<typeof total
     const value = gate[key];
     if (typeof value === "number") gateAnswered[key] = value;
   }
+  // pain is a flag, not a scale: 0/1 so the gate can close on it like the others
+  if (typeof gate.pain === "boolean") gateAnswered.pain = gate.pain ? 1 : 0;
   const lastGate = [...snap.checkins].filter((c) => c.kind === "gate").sort((a, b) => b.id - a.id)[0] ?? null;
 
   const checkinMuscles = window

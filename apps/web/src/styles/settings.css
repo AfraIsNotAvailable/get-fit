@@ -1,39 +1,8 @@
-/* ported from settings.html; scoped under .settings-page */
-  :root{
-    --paper:#faf9f6; --ink:#191917; --muted:#5f5d57; --faint:#7d7a72;
-    --line:#dcd9d2; --line2:#b9b5ab; --accent:#8d2f1b; --field:#fffefb;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --paper:#141413; --ink:#e9e6df; --muted:#a8a49a; --faint:#89857c;
-      --line:#2d2c28; --line2:#43413b; --accent:#d07a63; --field:#1a1a18;
-    }
-  }
-  *{box-sizing:border-box; border-radius:0}
-  body{
-    margin:0; background:var(--paper); color:var(--ink);
-    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap{max-width:760px; margin:0 auto; padding:38px 26px 96px}
+/* settings-only rules. The shared chrome (tokens, body, wrap, masthead, h1, .label,
+   .block) lives in dashboard.css: duplicating it there made this page 760px wide
+   and dropped --cal-empty/--scrim, because this file loads second. */
 
-  .masthead{
-    display:flex; justify-content:space-between; align-items:baseline; gap:16px;
-    padding-bottom:10px; border-bottom:1px solid var(--line2);
-    font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted);
-  }
-  .masthead .left{display:flex; align-items:baseline; gap:18px}
-  .brand{color:var(--ink); font-weight:600; letter-spacing:.17em; text-decoration:none}
-  .navlink{color:var(--faint); text-decoration:none; border-bottom:1px solid transparent}
-  .navlink:hover{color:var(--ink); border-bottom-color:var(--line2)}
-  .stamp{font-variant-numeric:tabular-nums; letter-spacing:.07em}
-
-  h1{font-size:32px; font-weight:500; letter-spacing:-.02em; margin:36px 0 8px}
-  .lede{margin:0 0 34px; color:var(--muted); max-width:58ch}
-  .label{font-size:10.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--faint); font-weight:600}
-
-  .block{margin:0 0 36px}
-  .block-head{display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding-bottom:9px; border-bottom:1px solid var(--line2)}
+  .wrap.settings{max-width:760px}
 
   .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:16px; padding:16px 0 4px}
   .f label{display:block; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:5px}
@@ -45,9 +14,9 @@
   input:focus{outline:none; border-color:var(--ink)}
   input:disabled{color:var(--faint); background:transparent; border-style:dashed}
 
-  .ex-head-row, .ex{display:grid; grid-template-columns:22px 1fr 78px 78px 92px; gap:12px; align-items:center}
-  .ex-head-row{padding:24px 0 6px; color:var(--faint); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:600}
-  .ex{padding:9px 0; border-top:1px solid var(--line)}
+  .exrow-head, .exrow{display:grid; grid-template-columns:22px 1fr 78px 78px 92px; gap:12px; align-items:center}
+  .exrow-head{padding:24px 0 6px; color:var(--faint); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:600}
+  .exrow{padding:9px 0; border-top:1px solid var(--line)}
   .idx{color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums}
   .clab{display:none}
   .cellname .furl{margin-top:5px; font-size:11.5px; color:var(--muted); font-family:inherit}
@@ -82,14 +51,14 @@
 
   @media (max-width:640px){
     .stamp{display:none}
-    .ex-head-row{display:none}
-    .ex{grid-template-columns:22px 1fr 1fr; row-gap:12px; padding:14px 0;
+    .exrow-head{display:none}
+    .exrow{grid-template-columns:22px 1fr 1fr; row-gap:12px; padding:14px 0;
         grid-template-areas:"i name name" ". min max" ". tools tools"}
-    .ex .idx{grid-area:i; align-self:end; padding-bottom:8px}
-    .ex .cellname{grid-area:name}
-    .ex .fmin{grid-area:min}
-    .ex .fmax{grid-area:max}
-    .ex .tools{grid-area:tools; justify-content:flex-start}
+    .exrow .idx{grid-area:i; align-self:end; padding-bottom:8px}
+    .exrow .cellname{grid-area:name}
+    .exrow .fmin{grid-area:min}
+    .exrow .fmax{grid-area:max}
+    .exrow .tools{grid-area:tools; justify-content:flex-start}
     .clab{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:600; margin-bottom:4px}
     .f.wide{grid-column:span 1}
     .msg{margin-left:0; flex-basis:100%}

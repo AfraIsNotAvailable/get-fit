@@ -40,13 +40,16 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
   const [fatigue, setFatigue] = useState<number | null>(null);
   const [soreness, setSoreness] = useState<number | null>(null);
   const [prs, setPrs] = useState<number | null>(null);
-  const [pain, setPain] = useState(false);
+  const [pain, setPain] = useState<number | null>(null);
   const [painWhere, setPainWhere] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const answered = dash.checkinTodo.gateAnswered;
-  const ready = dash.readiness;
+  const open = (["sleep", "stress", "fatigue", "soreness", "prs", "pain"] as const)
+    .filter((key) => answered[key] === undefined);
+
+  if (open.length === 0) return null;
 
   const submit = async () => {
     setBusy(true);
@@ -58,11 +61,11 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
       if (fatigue !== null) body.fatigue = fatigue;
       if (soreness !== null) body.soreness = soreness;
       if (prs !== null) body.prs = prs;
-      if (pain && painWhere) { body.pain = true; body.painWhere = painWhere; }
+      if (pain !== null) { body.pain = pain === 1; if (pain === 1 && painWhere) body.painWhere = painWhere; }
       await api.checkin(body);
       setMsg("saved");
       setSleep(""); setStress(null); setFatigue(null); setSoreness(null); setPrs(null);
-      setPain(false); setPainWhere("");
+      setPain(null); setPainWhere("");
       onDone();
     } catch (error) {
       setMsg(error instanceof ApiError ? (error.problem.errors?.[0]?.message ?? error.message) : "could not save");
@@ -73,45 +76,50 @@ export function GateForm({ dash, onDone }: { dash: Dashboard; onDone: () => void
 
   return (
     <div>
-      <Question title="Sleep" help="Hours actually slept. Converted to the 1–5 scale when readiness is computed.">
-        <input
-          className="pick num" type="number" min={0} max={14} step={0.5} value={sleep}
-          placeholder="hours" onChange={(event) => setSleep(event.target.value)}
-        />
-        {answered.sleep !== undefined ? <span className="label">answered {answered.sleep}</span> : null}
-      </Question>
-      <Question title="Stress" help="Hooper item: 1 = none, 5 = very high.">
-        <Seg value={stress} options={SEG5} onChange={setStress} />
-      </Question>
-      <Question title="Fatigue" help="Hooper item: 1 = fresh, 5 = exhausted.">
-        <Seg value={fatigue} options={SEG5} onChange={setFatigue} />
-      </Question>
-      <Question title="Soreness" help="Hooper item: 1 = nothing, 5 = everywhere.">
-        <Seg value={soreness} options={SEG5} onChange={setSoreness} />
-      </Question>
-      <Question title="Recovered" help="Perceived Recovery Status, 0–10. Lower than 5 halves everyone's ceiling.">
-        <Seg value={prs} options={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} onChange={setPrs} />
-      </Question>
-      <Question title="Pain" help="A flagged muscle is parked for 48 hours and excluded from selection.">
-        <label className="label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={pain} onChange={(event) => setPain(event.target.checked)} />
-          something hurts
-        </label>
-        {pain ? (
+      {open.includes("sleep") ? (
+        <Question title="Sleep, hours" help="Hours actually slept. Converted to the 1–5 scale when readiness is computed.">
+          <input
+            className="pick num" type="number" min={0} max={14} step={0.5} value={sleep}
+            placeholder="0–14" onChange={(event) => setSleep(event.target.value)}
+          />
+        </Question>
+      ) : null}
+      {open.includes("stress") ? (
+        <Question title="Stress" help="Hooper item: 1 = none, 5 = very high.">
+          <Seg value={stress} options={SEG5} onChange={setStress} />
+        </Question>
+      ) : null}
+      {open.includes("fatigue") ? (
+        <Question title="Fatigue" help="Hooper item: 1 = fresh, 5 = exhausted.">
+          <Seg value={fatigue} options={SEG5} onChange={setFatigue} />
+        </Question>
+      ) : null}
+      {open.includes("soreness") ? (
+        <Question title="Soreness" help="Hooper item: 1 = nothing, 5 = everywhere.">
+          <Seg value={soreness} options={SEG5} onChange={setSoreness} />
+        </Question>
+      ) : null}
+      {open.includes("prs") ? (
+        <Question title="Recovered" help="Perceived Recovery Status, 0–10. Lower than 5 halves everyone's ceiling.">
+          <Seg value={prs} options={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} onChange={setPrs} />
+        </Question>
+      ) : null}
+      {open.includes("pain") ? (
+        <Question title="Sharp pain" help="A flagged muscle is parked for 48 hours and excluded from selection.">
+          <Seg value={pain} options={[0, 1]} onChange={setPain} labels={(n) => (n === 1 ? "yes" : "no")} />
           <select className="pick" value={painWhere} onChange={(event) => setPainWhere(event.target.value)}>
-            <option value="">where?</option>
-            {dash.muscles.map((muscle) => (
-              <option key={muscle.slug} value={muscle.slug}>{muscle.name}</option>
-            ))}
+            <option value="">where</option>
+            {[...dash.muscles]
+              .sort((a, b) => a.sort - b.sort)
+              .map((muscle) => (
+                <option key={muscle.slug} value={muscle.slug}>{muscle.name}</option>
+              ))}
           </select>
-        ) : null}
-      </Question>
+        </Question>
+      ) : null}
       <div className="qfoot">
-        <button className="submit" type="button" onClick={submit} disabled={busy}>Save check-in</button>
+        <button className="submit" type="button" onClick={submit} disabled={busy}>Save</button>
         <span className="qmsg">{msg ?? ""}</span>
-        <span className="label" style={{ marginLeft: "auto" }}>
-          readiness {ready.score.toFixed(2)} · {ready.stale ? "stale" : "today"}
-        </span>
       </div>
     </div>
   );

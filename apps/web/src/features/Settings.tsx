@@ -45,6 +45,28 @@ export function SettingsPage({ dash, onSaved }: { dash: Dashboard; onSaved: () =
       return next;
     });
 
+  const enableAlerts = async () => {
+    if (!("Notification" in window)) {
+      setMsg({ text: "This browser has no notifications.", kind: "err" });
+      return;
+    }
+    if (!window.isSecureContext) {
+      setMsg({
+        text: `Needs https — open https://${window.location.hostname}:8443/settings and allow it there`,
+        kind: "err",
+      });
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setMsg(
+      permission === "granted"
+        ? { text: "Laptop alerts on", kind: "ok" }
+        : permission === "denied"
+          ? { text: "Blocked — allow notifications for this site in the browser", kind: "err" }
+          : { text: "Not granted", kind: "err" },
+    );
+  };
+
   const save = async () => {
     setBusy(true);
     setMsg(null);
@@ -112,13 +134,13 @@ export function SettingsPage({ dash, onSaved }: { dash: Dashboard; onSaved: () =
           <span className="label">Exercises</span>
           <span className="label">overflow runs top to bottom</span>
         </div>
-        <div className="ex-head-row">
+        <div className="exrow-head">
           <span>#</span><span>Exercise</span><span>Minimum</span><span>Max</span><span>Order</span>
         </div>
         {rows.map((row, index) => {
           const last = index === rows.length - 1;
           return (
-            <div className="ex" key={row.id ?? `new-${index}`}>
+            <div className="exrow" key={row.id ?? `new-${index}`}>
               <span className="idx">{index + 1}</span>
               <span className="cellname">
                 <span className="clab">Exercise</span>
@@ -157,6 +179,9 @@ export function SettingsPage({ dash, onSaved }: { dash: Dashboard; onSaved: () =
           </button>
         </div>
         <div className="actions">
+          <button className="btn ghost" type="button" onClick={() => void enableAlerts()}>
+            Enable laptop alerts
+          </button>
           <button className="btn" type="button" onClick={save} disabled={busy}>Save settings</button>
           <span className={`msg ${msg?.kind ?? ""}`}>{msg?.text ?? ""}</span>
         </div>

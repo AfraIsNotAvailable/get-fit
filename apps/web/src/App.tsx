@@ -75,15 +75,18 @@ export default function App() {
     }
   };
 
-  const checkinBlock = (
+  // the block disappears once every question is answered today, like the
+  // Python page: a finished form is not worth a section of empty rows
+  const gateOpen = (["sleep", "stress", "fatigue", "soreness", "prs", "pain"] as const)
+    .some((key) => dash.checkinTodo.gateAnswered[key] === undefined);
+  const showCheckin = dash.checkinTodo.due === "post" || gateOpen;
+
+  const checkinBlock = !showCheckin ? null : (
     <section className="block">
       <div className="block-head">
+        <span className="label">{dash.checkinTodo.due === "post" ? "After the set" : "Check-in"}</span>
         <span className="label">
-          {dash.checkinTodo.due === "post" ? "After the set" : "Check-in"}
-        </span>
-        <span className="label">
-          readiness {dash.readiness.score.toFixed(2)}
-          {dash.readiness.stale ? " · stale" : ""}
+          {Math.round(dash.readiness.score * 100)}% ready{dash.readiness.stale ? " · none today" : ""}
         </span>
       </div>
       {dash.checkinTodo.due === "post" && dash.checkinTodo.round ? (
@@ -102,7 +105,7 @@ export default function App() {
   );
 
   return (
-    <div className="wrap">
+    <div className={isSettings ? "wrap settings" : "wrap"}>
       <div className="masthead">
         <span className="left">
           <a className="brand" href="/">Get fit</a>
@@ -110,9 +113,13 @@ export default function App() {
             {isSettings ? "Dashboard" : "Settings"}
           </a>
         </span>
-        <span className="stamp">
-          {dash.serverTime.local} · {dash.serverTime.timezone}
-        </span>
+        {/* the settings page has no clock in the old app; it edits, it doesn't watch */}
+        {isSettings ? null : (
+          <span className="stamp">
+            {new Date(dash.serverTime.utc).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}
+            {" · "}{dash.serverTime.local}<span className="tz"> · {dash.serverTime.timezone}</span>
+          </span>
+        )}
       </div>
 
       {error ? <p className="lede" style={{ color: "var(--accent)" }}>{error}</p> : null}
