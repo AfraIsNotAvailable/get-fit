@@ -127,6 +127,11 @@ The dashboard runs as **`getfit.service`** on the host (`/etc/systemd/system/get
 post-job cleanup cannot take it down. The Hermes tick no longer starts the server: if systemd is gone,
 start it by hand rather than letting the tick race it for the port.
 
+The runner, however, lives *inside* the container (its own PID namespace) and cannot see or signal that
+unit. So `deploy.sh` drops a marker, `.restart-request`, in the checkout, and `getfit-restart.path` on
+the host watches for it and runs `systemctl restart getfit.service`. Both units are enabled; if the
+marker is not consumed (a host without them), the script falls back to starting its own server.
+
 Upgrading is `git push` from the development machine: the runner pulls, tests, restarts (the kill *is*
 the restart — systemd brings it back in about two seconds) and health-checks.
 

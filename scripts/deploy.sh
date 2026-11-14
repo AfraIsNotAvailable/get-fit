@@ -43,6 +43,19 @@ restart_server() {
       if healthy; then say "a supervisor restarted the dashboard"; return 0; fi
       sleep 0.5
     done
+  else
+    # The dashboard can live outside this PID namespace: on the Pi it is
+    # getfit.service on the host, which a CI job inside the container cannot see
+    # or signal. Ask the box to bounce it — getfit-restart.path watches for this
+    # marker, removes it, and restarts the unit.
+    say "no dashboard in this namespace; requesting a restart via .restart-request"
+    : > "$APP/.restart-request"
+    for _ in $(seq 1 30); do
+      [ -e "$APP/.restart-request" ] || { say "supervisor restarted the dashboard"; return 0; }
+      sleep 0.3
+    done
+    rm -f "$APP/.restart-request"
+    say "restart request was not picked up — starting a server here instead"
   fi
   # double-fork: the cron keepalive does the same, and a server parented to this
   # shell would keep a CI job waiting on the process tree

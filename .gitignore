@@ -3,6 +3,9 @@ server.log
 hook.log
 .lock
 
+# deploy marker: deploy.sh drops this for the host's getfit-restart.path
+.restart-request
+
 # screenshots
 preview.png
 
