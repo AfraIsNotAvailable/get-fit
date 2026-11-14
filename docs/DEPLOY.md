@@ -87,7 +87,7 @@ Consequences worth knowing:
   not the end of the world; the rollback just makes sure the *code* is the last known good one.
 
 **No runner?** The script is idempotent, so polling works instead: put
-`*/5 * * * * /opt/data/home/dev/web/get-fit/scripts/deploy.sh >> /opt/data/logs/getfit-deploy.log 2>&1`
+`*/5 * * * * /home/afra/get-fit/scripts/deploy.sh >> /home/afra/get-fit/deploy.log 2>&1`
 in cron and it deploys within five minutes of a push, doing nothing when there is nothing to do.
 
 ## One writer only
