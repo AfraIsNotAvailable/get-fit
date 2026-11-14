@@ -160,3 +160,35 @@ decision, not a rendering one.
 - [ ] one FCM notification arrives with the app killed
 - [ ] going offline logs the client out cleanly (v1 policy) and re-pairing works
 - [ ] dark mode? — currently only paper/ink; decide before building the Android theme
+
+---
+
+## 5. Parity pitfalls, learned the hard way
+
+The first React pass rendered every section and still looked wrong: 760px wide instead of 980, the
+calendar with no month labels, hovering a muscle painted nothing. None of it was missing components —
+it was the port, not the markup. Check these before believing a layout difference is a design choice.
+
+**Two stylesheets, one global scope.** `index.html` and `settings.html` were separate documents with
+overlapping class names, which is fine until both are imported into one app:
+
+- `.wrap` was declared in both — 980px on the dashboard, 760px on settings. Imported second,
+  settings won, and the whole dashboard rendered narrow. Keep the chrome (tokens, `body`, `.wrap`,
+  masthead, `h1`, `.label`, `.block`) in one file and scope the settings page with `.wrap.settings`.
+- the settings `:root` was an older copy without `--cal-empty` and `--scrim`, so importing it second
+  silently dropped those tokens and the calendar's empty cells lost their colour.
+- `.ex` meant "exercise row" on settings and "form-article link" on the dashboard. The link inherited
+  `display:grid` and a border, so assignments stacked as full-width blocks. Renamed to `.exrow`.
+
+**The atlas maps slugs to shape ids.** The SVG ids are anatomical (`pectoralis_major_l`), the API
+speaks slugs (`chest`). Matching by name paints nothing; the `MUSCLE_ART` table is the only correct
+source. The figure also swaps front/back per muscle, and injecting that markup wipes the highlight —
+re-apply it after the swap or every second hover goes dark.
+
+**The calendar scale is theoretical.** `dayScale` is rounds-per-day × the base stack, not the best day
+ever logged, and weeks start Monday with spacers for days that have not happened yet. Getting either
+wrong makes the year look sparse or dense rather than wrong.
+
+**Compare pixels, not memories.** Both pages at 1440px: 2368 vs 2369px tall, settings 2021 vs 2021,
+`.body` 148×326, `.mrow2` 239×31, 12px type, the same horizontal overflow (the hero strip scrolls).
+Those numbers settle an argument faster than a screenshot at an arbitrary window size.
