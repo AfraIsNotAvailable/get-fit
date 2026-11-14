@@ -84,6 +84,9 @@ case "$PHASE" in
     install_env
     set_env GETFIT_READ_ONLY=1
     set_env SCHEDULER=off
+    # the browser client authenticates with the Cloudflare Access session, not a bearer
+    # token; device tokens are for the phone, which will need an /api/* bypass rule
+    set_env GETFIT_REQUIRE_TOKEN=0
     sudo systemctl restart getfit-api.service
     if wait_health; then
       say "shadow API healthy on http://127.0.0.1:8787 (read-only, no scheduler)"
@@ -114,6 +117,7 @@ case "$PHASE" in
     install_env
     set_env GETFIT_READ_ONLY=0
     set_env SCHEDULER=on
+    set_env GETFIT_REQUIRE_TOKEN=0
     sudo systemctl enable getfit-api.service
     sudo systemctl restart getfit-api.service
     wait_health || { sudo journalctl -u getfit-api -n 30 --no-pager; die "API did not come up"; }
