@@ -3,6 +3,13 @@
 Everything the service needs is in this repository except two things that belong to the machine:
 a scheduler and (optionally) a messaging hook. This file is the checklist for moving the runtime.
 
+> **Which branch does the box deploy?** `deploy.yml` passes `GETFIT_BRANCH`
+> (`vars.GETFIT_BRANCH`, default `main`). The Pi runs the frozen Python app, so the repo variable is
+> set to **`v1`** — a push to `main` (the TypeScript port) then triggers a deploy that only
+> health-checks, and cannot change what is running. The deploy log names the branch it checked out:
+> `[deploy] at 70b5052 (v1)` / `nothing to deploy; dashboard healthy on :8777`. Unset the variable
+> when the cutover makes `main` the runtime branch.
+
 ## What the service actually is
 
 | piece | process | lives in |
