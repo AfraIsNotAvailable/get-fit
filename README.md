@@ -9,11 +9,12 @@ state it is in.
 | | where | status |
 |---|---|---|
 | **v2 — this one** | `packages/engine`, `packages/db`, `packages/contracts`, `apps/server`, `apps/web` | **main**. A pure-TypeScript engine, an Express `/api/v1` described by `docs/openapi.yaml`, and a React dashboard. This is what everything new goes into. Mobile (Android) is next against the same API. |
-| **v1 — the Python app** | `getfit.py`, `muscles.py`, `server.py`, `index.html`, `settings.html`, `tests.py` | **frozen** on branch [`v1`](../../tree/v1) (tag `v1.0-python`). It is what the Pi serves today at `fit.afrasinei.dev`; it keeps running, nothing new lands there. |
+| **v1 — the Python app** | `getfit.py`, `muscles.py`, `server.py`, `index.html`, `settings.html`, `tests.py` | **frozen** on branch [`v1`](../../tree/v1) (tag `v1.0-python`). It ran `fit.afrasinei.dev` until the cutover on 2026-11-14 and is the rollback target; nothing new lands there. It stays in `main`'s tree because `tools/parity.py` uses it as the oracle. |
 
-The two are numerically equivalent on the live database — `tools/parity.py` diffs the TypeScript
-dashboard against Python's `getfit.view()` and must report **0 diffs** — and `tools/spec-check.py`
-keeps the OpenAPI document honest against the running server.
+The Pi runs **this** application: `getfit-api.service` on the host, Cloudflare tunnel →
+`127.0.0.1:8787`, `fit.afrasinei.dev` behind Access. `tools/parity.py` still diffs the TypeScript
+dashboard against Python's `getfit.view()` (0 diffs when the model is unchanged) and
+`tools/spec-check.py` keeps the OpenAPI document honest against the running server.
 
 ## Layout
 
