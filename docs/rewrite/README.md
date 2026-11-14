@@ -240,10 +240,23 @@ named test in `packages/engine/test/parity.test.ts`.
   selection, check-ins, the calendar and the round state machine as pure functions. The 60 assertions of
   `tests.py` are ported into 26 Vitest cases (`pnpm --filter @getfit/engine test`), all passing, with
   `tsc --noEmit` clean.
-- **Still outstanding in phase 0/1:** the golden-capture script and the 1 000-case differential run
-  against `getfit.py` (the port is assertion-parity, not yet fuzzed), and the `packages/db` layer.
-- **Next:** `packages/db` (schema, migrations, repositories over `node:sqlite`) → `apps/server` with
-  `/health`, `/dashboard`, `/settings`, `/rounds/{key}/confirm`, `/checkins` → the web app.
+- **Phase 2 — shadow-capable, partly done.** `packages/db` opens the Python schema unchanged (plus the
+  additive tables), migrates an old database in place, and loads the engine's `Snapshot`;
+  `apps/server` serves `/api/v1` with `/health`, `/now`, `/meta`, `/dashboard` (ETag/304, `?sections=`),
+  `/rounds`, `/rounds/{key}`, `/rounds/{key}/confirm`, `/checkins`, `/checkins/todo`, `/muscles`,
+  `/profile`, `/calendar`, `/settings` (GET/PUT), and problem+json errors. 41 tests green (engine 26,
+  db 4, server 11).
+- **Parity proven on the live database.** `python3 tools/parity.py` copies the Pi's `getfit.db` twice
+  and diffs `getfit.view()` against `/api/v1/dashboard`: **0 diffs** across totals, sets, current round,
+  next set, preview, readiness, the 22 muscles and the three hottest, the calendar day and the month
+  ceiling.
+- **The harness already paid for itself twice**, both caught on the first real run: JavaScript's `%`
+  keeps the sign where Python's wraps, so a quiet window crossing midnight inflated the monthly ceiling
+  from 3000 to 7800; and with decay now pure, `view()` has to decay for itself instead of trusting a
+  previous read to have persisted it.
+- **Still open:** auth/tokens, the Telegram notifier in the scheduler, the `/dev/*` surface, contracts →
+  generated OpenAPI + clients, and the web app.
+- **Next:** `packages/contracts` (zod → emitted `openapi.yaml` → TS client) and `apps/web`.
 
 A note on the plan that changed while implementing: `better-sqlite3` is replaced by **`node:sqlite`**
 (`DatabaseSync`), which ships with Node 24 — no native build, no prebuilt-binary risk on arm64, and the

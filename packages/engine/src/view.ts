@@ -112,7 +112,7 @@ export function view(snap: Snapshot, now: Date, opening: Parameters<typeof total
   const { rows, meta } = planRound(snap, now);
   const ready = readiness(snap, now);
   const influence = profileGet(snap, "readiness_influence");
-  const muscles = muscleRows(snap, now, false).map((m) => ({
+  const muscles = muscleRows(snap, now, true).map((m) => ({
     ...m,
     stopEffective: pyRound(effectiveStop(m.stopAt, ready.score, influence), 1),
   }));

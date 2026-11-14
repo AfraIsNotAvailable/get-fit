@@ -15,6 +15,8 @@ Everything below is a *design*; the current server still exposes `/api/state`, `
 |---|---|
 | base path | `/api/v1`. Breaking changes go to `/api/v2`; additive fields never bump. |
 | ids | slash-safe slugs (`split-squats`) for exercises and muscles, 12-char opaque keys for rounds (`9f3a1c07be42`). |
+| field names | **camelCase on the wire** (`intervalMinutes`, `roundOpen`, `nextSet`). The draft spec below still
+  spells some of these in snake_case; `packages/contracts` will be the source of truth and re-emit it. |
 | time | all instants RFC 3339 UTC with `Z` (`2026-11-14T13:35:20Z`). Local renderings are *derived* server-side and returned next to them (`local: "15:35"`), never as the only form. The client never guesses the timezone: `settings.timezone` + `meta.server_time` are always present. |
 | durations | integer seconds (`seconds_left`), integer minutes in settings. |
 | numbers | reps are integers; wear/soreness/readiness are floats 0..100 / 0..1, rounded to 1 dp at the edge. |

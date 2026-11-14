@@ -123,7 +123,10 @@ export function buildMonths(snap: Snapshot, now: Date): MonthsData {
   const settings = snap.settings;
   const qs = Math.floor(hmSeconds(settings.quietStart) / 60);
   const qe = Math.floor(hmSeconds(settings.quietEnd) / 60);
-  const quietMinutes = qs === qe ? 0 : ((qe - qs) % 1440 || 1440);
+  // Python's % is always non-negative; JavaScript keeps the sign, so a
+  // quiet window that crosses midnight would go negative here.
+  const span = (((qe - qs) % 1440) + 1440) % 1440;
+  const quietMinutes = qs === qe ? 0 : (span || 1440);
   const activeMinutes = Math.max(settings.intervalMinutes, 1440 - quietMinutes);
   const roundsPerDay = Math.max(1, Math.floor(activeMinutes / settings.intervalMinutes));
   const baseReps = compose(snap.exercises, 0).reduce((sum, r) => sum + r.reps, 0) || 1;
