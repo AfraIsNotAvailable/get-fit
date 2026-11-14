@@ -132,6 +132,10 @@ unit. So `deploy.sh` drops a marker, `.restart-request`, in the checkout, and `g
 the host watches for it and runs `systemctl restart getfit.service`. Both units are enabled; if the
 marker is not consumed (a host without them), the script falls back to starting its own server.
 
+Changing `deploy.sh` itself takes effect one deploy late: the job runs the copy already in the working
+tree and only *then* checks the new commit out. Expect a deploy that rewrites the script to still
+behave like the old one, and verify the following one.
+
 Upgrading is `git push` from the development machine: the runner pulls, tests, restarts (the kill *is*
 the restart — systemd brings it back in about two seconds) and health-checks.
 
