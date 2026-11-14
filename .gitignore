@@ -21,3 +21,9 @@ getfit.db-shm
 
 # local TLS material for the https listener
 certs/
+
+# node / pnpm
+node_modules/
+dist/
+.vitest/
+*.tsbuildinfo

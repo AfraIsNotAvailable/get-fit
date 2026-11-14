@@ -1,0 +1,1619 @@
+openapi: 3.1.0
+
+info:
+  title: get-fit API
+  version: 0.1.0-draft
+  summary: Escalating workout stack, muscle fatigue model and check-ins.
+  description: |
+    **Draft for the Vite + React + Express rewrite. Nothing here is implemented yet.**
+
+    This document is the shape the rewrite should converge on (see `docs/rewrite/api.md`
+    for the reasoning). It is written by hand so it can be reviewed, linted and fed to a
+    Kotlin generator before any server code exists.
+
+    The current Python server exposes four endpoints — `GET /api/state`,
+    `POST /api/settings`, `POST /api/confirm`, `POST /api/checkin` — with no auth and no
+    versioning. Everything below is `/api/v1`, resource-oriented and typed.
+  contact:
+    name: Afra
+    url: https://fit.afrasinei.dev
+  license:
+    name: Private
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://fit.afrasinei.dev/api/v1
+    description: Public (Cloudflare tunnel + Access)
+  - url: http://127.0.0.1:8787/api/v1
+    description: Local development
+
+tags:
+  - name: meta
+    description: Server time, taxonomy, movement library and enum vocabulary.
+  - name: dashboard
+    description: The composite home view; every section is also its own resource.
+  - name: rounds
+    description: Sets that were sent, their response window and their resolution.
+  - name: checkins
+    description: The gate questionnaire (before a set) and the post-set questionnaire.
+  - name: muscles
+    description: The 22-group fatigue model, its attribution and manual overrides.
+  - name: exercises
+    description: The exercise stack — dosage, order, form links, retirement.
+  - name: settings
+    description: Schedule, quiet window and timezone.
+  - name: calendar
+    description: Day cells and monthly ceilings derived from resolved rounds.
+  - name: profile
+    description: Fitted parameters, their audit trail and recalibration.
+  - name: auth
+    description: Device pairing and bearer tokens for native clients.
+  - name: devices
+    description: Push notification registrations.
+  - name: system
+    description: Liveness and diagnostics.
+
+security:
+  - bearerAuth: []
+  - cfAccessJwt: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness and version
+      security: []
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is up and the database is readable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /meta:
+    get:
+      tags: [meta]
+      summary: Taxonomy, movement library and enum values
+      description: |
+        Everything a client needs to render without hard-coded vocabulary: the 22 muscle
+        groups in display order, the movement library with attribution, and the enum
+        values used by the rest of the API. Safe to cache for a day (ETag).
+      operationId: getMeta
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Static reference data.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Meta" }
+        "304":
+          $ref: "#/components/responses/NotModified"
+
+  /now:
+    get:
+      tags: [meta]
+      summary: Server time and clock state
+      description: |
+        The cheapest endpoint in the API. A native client polls this (or uses it to
+        correct its own clock) without pulling the dashboard. `quiet_now` mirrors the
+        quiet-window state, and `seconds_to_next_event` is the shortest of "next set"
+        and "response window closes" when either is scheduled.
+      operationId: getNow
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Current clock state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerTime" }
+
+  /dashboard:
+    get:
+      tags: [dashboard]
+      summary: Composite home view
+      description: |
+        The 17 sections the dashboard renders, in one round trip. `sections` narrows the
+        response (the Android home asks for six of them). Supports `If-None-Match`: while
+        nothing has moved the client gets `304` and pays nothing.
+
+        A section is never *only* available here — each has its own endpoint, so the
+        composite cannot become a screen-scraper.
+      operationId: getDashboard
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          description: Comma-separated section names; omitted means all of them.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/DashboardSectionName" }
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: The requested sections.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dashboard" }
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /settings:
+    get:
+      tags: [settings]
+      summary: Read the schedule and the exercise stack
+      operationId: getSettings
+      responses:
+        "200":
+          description: Current settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    put:
+      tags: [settings]
+      summary: Replace settings and the whole stack
+      description: |
+        Full replacement, matching today's `POST /api/settings`: the posted exercise list
+        becomes the active stack and **any active exercise missing from it is retired**
+        (`active = 0`, history kept). The last exercise is always uncapped, so its `max` is
+        written as `null` regardless of what is sent.
+
+        New exercises are attributed against the movement library on save; a name the
+        library does not know is accepted but flagged in `unattributed` until its muscles
+        are added.
+      operationId: putSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsInput" }
+      responses:
+        "200":
+          description: Saved settings, as stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /exercises:
+    get:
+      tags: [exercises]
+      summary: List the stack (active and retired)
+      operationId: listExercises
+      parameters:
+        - name: active
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Exercises in stack order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Exercise" }
+
+    post:
+      tags: [exercises]
+      summary: Add an exercise
+      description: |
+        Attribution is seeded from the movement library by slug or normalised name. A
+        movement the library does not know is still created, but it does not participate
+        in the fatigue model and appears in `unattributed`.
+      operationId: createExercise
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExerciseInput" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exercise" }
+        "409":
+          description: An exercise with that slug already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /exercises/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/ExerciseSlug"
+    patch:
+      tags: [exercises]
+      summary: Rename, re-dosage, reorder or re-link an exercise
+      operationId: patchExercise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExercisePatch" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exercise" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+    delete:
+      tags: [exercises]
+      summary: Retire an exercise
+      description: |
+        Never deletes rows: sets `active = 0` and `retired_at`. Rounds, rep history and
+        learned `k` survive, which is what keeps lifetime totals honest.
+      operationId: retireExercise
+      responses:
+        "204":
+          description: Retired.
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /rounds:
+    get:
+      tags: [rounds]
+      summary: List rounds, newest first
+      operationId: listRounds
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/RoundStatus" }
+        - name: from
+          in: query
+          required: false
+          description: Inclusive lower bound on `sent_at`.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: A page of rounds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoundPage" }
+
+    post:
+      tags: [rounds]
+      summary: Fire a set now
+      description: |
+        Opens a round immediately, ignoring the interval clock and the quiet window — the
+        manual equivalent of a tick. Used by the settings screen's "send one now" and by
+        tests. Refused with `409 round_already_open` if a round is pending.
+      operationId: openRound
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Round opened.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Round" }
+        "409":
+          description: A round is already open.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /rounds/{key}:
+    parameters:
+      - $ref: "#/components/parameters/RoundKey"
+    get:
+      tags: [rounds]
+      summary: One round with its items
+      operationId: getRound
+      responses:
+        "200":
+          description: The round.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Round" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /rounds/{key}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/RoundKey"
+    post:
+      tags: [rounds]
+      summary: Log the round as done (or late)
+      description: |
+        The one mutation whose target is explicit, which is what makes it safe from two
+        devices and safe to retry.
+
+        - inside the response window → status `done`, bonus resets to 0;
+        - after the deadline (or after it was already marked `missed`) → `late`, bonus 2;
+        - already resolved, or a `round_key` that is not the open round → `409`, with the
+          current status in the problem body so the client reconciles instead of shouting.
+
+        Returns the receipt text the Telegram hook posts today, plus the next set time.
+      operationId: confirmRound
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmationInput" }
+      responses:
+        "200":
+          description: Logged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Confirmation" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Already resolved, or the status did not match `expected_status`.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /checkins/todo:
+    get:
+      tags: [checkins]
+      summary: What is due right now
+      description: |
+        `post` when the response window after a resolved set is open and that set has not
+        been answered yet (with the muscles it loaded and the seconds left), otherwise
+        `gate`. `gate_answered` lists today's already-answered questions so the client
+        hides only those.
+      operationId: getCheckinTodo
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: The questionnaire the client should offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckinTodo" }
+
+  /checkins:
+    get:
+      tags: [checkins]
+      summary: Check-in history
+      operationId: listCheckins
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/CheckinKind" }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Rows, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Checkin" }
+
+    post:
+      tags: [checkins]
+      summary: Answer a gate or post questionnaire
+      description: |
+        One endpoint, two shapes, discriminated by `kind`. Every field except `kind` is
+        optional — a partial answer is better than none, the model degrades gracefully.
+
+        A `post` answer must carry the `round_key` of a round whose response window is
+        still open and which has not been answered. Late, repeated, unknown-round or
+        muscle-not-worked answers are `409` with a `code` — the four `CheckinRefused`
+        reasons the current server returns as a bare sentence.
+      operationId: createCheckin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CheckinInput" }
+      responses:
+        "201":
+          description: Recorded, with the model's new view of the affected muscles.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckinResult" }
+        "409":
+          description: Refused (window closed, already answered, unknown round, muscle not worked).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /muscles:
+    get:
+      tags: [muscles]
+      summary: All 22 muscle groups with their current state
+      description: |
+        `load` is `max(wear, soreness)` — the number that gates selection. `stop_effective`
+        is the stop line after today's readiness is applied; it is what the client should
+        paint against. Sorted by load, descending.
+      operationId: listMuscles
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Muscle states.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MuscleState" }
+
+  /muscles/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/MuscleSlug"
+    get:
+      tags: [muscles]
+      summary: One muscle with its attribution
+      operationId: getMuscle
+      responses:
+        "200":
+          description: Muscle state plus the exercises that load it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MuscleDetail" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [muscles]
+      summary: Manual override of a muscle's state
+      description: |
+        The `setwear` / `rest_until` escape hatch. Every field is optional; sending one
+        records the override so a later `refit` does not silently undo it.
+      operationId: patchMuscle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MusclePatch" }
+      responses:
+        "200":
+          description: Updated state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MuscleState" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /library:
+    get:
+      tags: [muscles]
+      summary: Movement library with learned coefficients
+      description: |
+        One row per (exercise, muscle) pair: role, base weight, learned `k`, and how many
+        observations back it. `k` moves only through check-ins.
+      operationId: getLibrary
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Attribution rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LibraryRow" }
+
+  /profile:
+    get:
+      tags: [profile]
+      summary: Fitted parameters and calibration error
+      operationId: getProfile
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: The model's current beliefs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+
+  /profile/history:
+    get:
+      tags: [profile]
+      summary: Audit trail of parameter changes
+      operationId: getProfileHistory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 40 }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProfileHistoryRow" }
+
+  /profile/refit:
+    post:
+      tags: [profile]
+      summary: Recompute parameters from the wear ledger
+      operationId: refitProfile
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Refit summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefitResult" }
+
+  /calendar:
+    get:
+      tags: [calendar]
+      summary: Day cells and month ceilings
+      description: |
+        `days` is keyed by local date (`YYYY-MM-DD`) for the last 364 days; `months`
+        carries the rolling 12 with their ceiling (`days × rounds per day × base reps`).
+        With `month=YYYY-MM` the day range is that month instead.
+      operationId: getCalendar
+      parameters:
+        - name: month
+          in: query
+          required: false
+          schema: { type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$" }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200":
+          description: Calendar data.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Calendar" }
+
+  /auth/pair:
+    post:
+      tags: [auth]
+      summary: Exchange a pairing code for a device token
+      description: |
+        The code shown in the web app's device list, entered once on the phone. Single
+        use, 8 digits, five minutes, rate limited. Answers the same problem body for a
+        wrong and for a consumed code.
+      operationId: pairDevice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PairInput" }
+      responses:
+        "201":
+          description: Paired. The token is returned exactly once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          description: Code unknown, expired or already used.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/token:
+    post:
+      tags: [auth]
+      summary: Rotate the device token
+      description: The previous token stays valid for five minutes, so a lost response is retryable.
+      operationId: rotateToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRotateInput" }
+      responses:
+        "200":
+          description: New token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: The device behind the current token
+      operationId: getMe
+      responses:
+        "200":
+          description: Device identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    delete:
+      tags: [auth]
+      summary: Revoke the current device
+      operationId: revokeMe
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /devices:
+    post:
+      tags: [devices]
+      summary: Register a push token
+      operationId: registerDevice
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceRegistration" }
+      responses:
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /devices/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [devices]
+      summary: Unregister a push token
+      operationId: unregisterDevice
+      responses:
+        "204":
+          description: Unregistered.
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Device token from `/auth/pair`, stored in the phone's Keystore-backed storage.
+        Sent as `Authorization: Bearer <token>`. Tokens are per device and revocable.
+    cfAccessJwt:
+      type: apiKey
+      in: header
+      name: cf-access-jwt-assertion
+      description: |
+        Injected by Cloudflare Access after a browser login. This is how the web app is
+        authenticated; it is not something a native client can produce.
+
+  headers:
+    ETag:
+      description: Opaque validator for the body; send it back as `If-None-Match`.
+      schema: { type: string }
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Client-generated UUID. A replay with the same key returns the stored response and
+        `Idempotent-Replay: true` instead of performing the mutation twice. Kept 24 h.
+      schema: { type: string, maxLength: 64 }
+    RoundKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-f0-9]{12}$" }
+    ExerciseSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-z0-9-]+$" }
+    MuscleSlug:
+      name: slug
+      in: path
+      required: true
+      description: One of the 22 slugs listed by `/meta`.
+      schema: { type: string, pattern: "^[a-z0-9-]+$" }
+
+  responses:
+    NotModified:
+      description: Nothing changed since the supplied ETag.
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: The resource does not exist.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ValidationFailed:
+      description: The body or query did not validate.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ValidationProblem" }
+    TooManyRequests:
+      description: Rate limited.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ServiceUnavailable:
+      description: Database unavailable or locked.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    # ---------------------------------------------------------------- primitives
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          description: Stable machine-readable reason, e.g. `round_already_resolved`.
+        detail: { type: string }
+        instance: { type: string }
+        current:
+          type: object
+          additionalProperties: true
+          description: Optional snapshot of the conflicting resource.
+
+    ValidationProblem:
+      allOf:
+        - $ref: "#/components/schemas/Problem"
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                required: [path, message]
+                properties:
+                  path: { type: string, description: "e.g. exercises[2].min" }
+                  message: { type: string }
+
+    Health:
+      type: object
+      required: [ok, version, db]
+      properties:
+        ok: { type: boolean }
+        version: { type: string }
+        db:
+          type: object
+          required: [ok, path]
+          properties:
+            ok: { type: boolean }
+            path: { type: string }
+            schema_version: { type: integer }
+        scheduler:
+          type: object
+          properties:
+            enabled: { type: boolean }
+            last_tick_at: { type: [string, "null"], format: date-time }
+
+    ServerTime:
+      type: object
+      required: [utc, local, timezone, quiet_now]
+      properties:
+        utc: { type: string, format: date-time }
+        local:
+          type: string
+          description: Rendered in `timezone`, HH:MM:SS.
+          examples: ["15:35:20"]
+        date_local: { type: string, format: date }
+        timezone: { type: string, examples: ["Europe/Bucharest"] }
+        quiet_now: { type: boolean }
+        quiet_window:
+          type: object
+          required: [start, end]
+          properties:
+            start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+            end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        seconds_to_next_event:
+          type: [integer, "null"]
+          description: Shortest of the next set and the closing response window.
+
+    RoundStatus:
+      type: string
+      enum: [pending, done, late, missed]
+
+    CheckinKind:
+      type: string
+      enum: [gate, post]
+
+    StorageRole:
+      type: string
+      enum: [primary, secondary, stabiliser]
+      description: How a movement loads a muscle in the attribution library.
+
+    Stopper:
+      type: string
+      enum: [muscle, breathing, joints, boredom]
+
+    # ---------------------------------------------------------------- settings
+    Settings:
+      type: object
+      required: [timezone, interval_minutes, response_minutes, quiet_start, quiet_end, exercises]
+      properties:
+        timezone: { type: string }
+        interval_minutes: { type: integer, minimum: 1, maximum: 1440 }
+        response_minutes: { type: integer, minimum: 1, maximum: 240 }
+        quiet_start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        quiet_end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        exercises:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Exercise" }
+
+    SettingsInput:
+      type: object
+      required: [timezone, interval_minutes, response_minutes, quiet_start, quiet_end, exercises]
+      properties:
+        timezone: { type: string }
+        interval_minutes: { type: integer, minimum: 1, maximum: 1440 }
+        response_minutes: { type: integer, minimum: 1, maximum: 240 }
+        quiet_start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        quiet_end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        exercises:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ExerciseInput" }
+
+    Exercise:
+      type: object
+      required: [slug, name, min, max, active, position]
+      properties:
+        slug: { type: string }
+        name: { type: string, maxLength: 40 }
+        min: { type: integer, minimum: 0, maximum: 500 }
+        max:
+          type: [integer, "null"]
+          minimum: 0
+          description: Null means uncapped — the bonus sink.
+        form_url:
+          type: [string, "null"]
+          format: uri
+          description: The how-to article. A wrong one is worse than none; never guess.
+        active: { type: boolean }
+        position: { type: integer }
+        retired_at: { type: [string, "null"], format: date-time }
+        attributed: { type: boolean, description: False when the library does not know it. }
+
+    ExerciseInput:
+      type: object
+      required: [name, min]
+      properties:
+        id:
+          type: string
+          description: Existing slug; omit to create (the server slugifies the name).
+        name: { type: string, minLength: 1, maxLength: 40 }
+        min: { type: integer, minimum: 0, maximum: 500 }
+        max:
+          type: [integer, "null"]
+          description: Ignored (forced to null) on the last exercise in the list.
+        form_url: { type: [string, "null"] }
+
+    ExercisePatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        min: { type: integer, minimum: 0, maximum: 500 }
+        max: { type: [integer, "null"] }
+        form_url: { type: [string, "null"] }
+        position: { type: integer, minimum: 0 }
+
+    # ---------------------------------------------------------------- rounds
+    RoundItem:
+      type: object
+      required: [exercise_slug, exercise_name, reps]
+      properties:
+        exercise_slug: { type: string }
+        exercise_name: { type: string }
+        reps: { type: integer, minimum: 0 }
+
+    Round:
+      type: object
+      required: [round_key, status, sent_at, deadline_at, target_reps, items]
+      properties:
+        round_key: { type: string, pattern: "^[a-f0-9]{12}$" }
+        status: { $ref: "#/components/schemas/RoundStatus" }
+        sent_at: { type: string, format: date-time }
+        sent_local_date: { type: string, format: date }
+        deadline_at: { type: string, format: date-time }
+        resolved_at: { type: [string, "null"], format: date-time }
+        source: { type: [string, "null"], examples: ["web", "android", "telegram", "cli"] }
+        target_reps: { type: integer }
+        bonus_applied: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RoundItem" }
+        seconds_left:
+          type: [integer, "null"]
+          description: Only for a pending round.
+
+    RoundPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Round" }
+        next_cursor: { type: [string, "null"] }
+
+    ConfirmationInput:
+      type: object
+      required: [source]
+      properties:
+        source:
+          type: string
+          enum: [web, android, telegram, cli]
+        expected_status:
+          type: string
+          enum: [pending, missed]
+          description: Optimistic guard; mismatch returns 409 with the current status.
+        note: { type: string, maxLength: 500 }
+
+    Confirmation:
+      type: object
+      required: [round_key, status, receipt]
+      properties:
+        round_key: { type: string }
+        status: { $ref: "#/components/schemas/RoundStatus" }
+        receipt:
+          type: string
+          description: The sentence the Telegram hook posts today.
+        next_set: { $ref: "#/components/schemas/NextSet" }
+        clock: { $ref: "#/components/schemas/Clock" }
+
+    # ---------------------------------------------------------------- clocks
+    Clock:
+      type: object
+      required: [bonus]
+      properties:
+        bonus: { type: integer, minimum: 0 }
+        next_set_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null while a round is open — the interval clock only runs between rounds.
+
+    NextSet:
+      type: object
+      required: [at, local, deferred, seconds_left]
+      properties:
+        at: { type: string, format: date-time }
+        local: { type: string, examples: ["16:19"] }
+        scheduled:
+          type: string
+          format: date-time
+          description: Before the quiet window pushed it into the active window.
+        deferred: { type: boolean }
+        seconds_left: { type: integer }
+
+    AssignmentItem:
+      type: object
+      required: [id, name, reps]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        reps: { type: integer }
+        form_url: { type: [string, "null"] }
+
+    # ---------------------------------------------------------------- checkins
+    Readiness:
+      type: object
+      required: [score, stale]
+      properties:
+        score: { type: number, minimum: 0, maximum: 1 }
+        stale: { type: boolean, description: True when today's gate is older than 18 h. }
+        prs: { type: [integer, "null"] }
+        at: { type: [string, "null"], format: date-time }
+        pain: { type: boolean }
+        pain_where: { type: [string, "null"] }
+        hooper: { type: [number, "null"], minimum: 1, maximum: 5 }
+        answers:
+          type: array
+          items: { type: string }
+
+    CheckinTarget:
+      type: object
+      required: [round_key, expires_at, seconds_left, exercises, muscles]
+      properties:
+        round_key: { type: string }
+        at: { type: [string, "null"], format: date-time }
+        expires_at: { type: string, format: date-time }
+        seconds_left: { type: integer }
+        exercises:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              reps: { type: integer }
+        muscles:
+          type: array
+          description: The muscles that round actually loaded, most relevant first.
+          items:
+            type: object
+            properties:
+              slug: { type: string }
+              name: { type: string }
+              role: { $ref: "#/components/schemas/StorageRole" }
+
+    CheckinTodo:
+      type: object
+      required: [due, window_minutes, readiness]
+      properties:
+        due:
+          type: string
+          enum: [gate, post]
+          description: Which questionnaire the client should offer.
+        round:
+          oneOf:
+            - $ref: "#/components/schemas/CheckinTarget"
+            - type: "null"
+          description: Present only when `due` is `post`.
+        expires_at: { type: [string, "null"], format: date-time }
+        seconds_left: { type: [integer, "null"] }
+        window_minutes: { type: integer }
+        readiness: { $ref: "#/components/schemas/Readiness" }
+        gate_answered:
+          type: object
+          description: Today's already-answered gate questions, so only the rest are asked.
+          additionalProperties:
+            type: [integer]
+          example: { sleep: 4, stress: 2 }
+        last_gate:
+          type: [object, "null"]
+          additionalProperties: true
+
+    CheckinInput:
+      oneOf:
+        - $ref: "#/components/schemas/GateCheckin"
+        - $ref: "#/components/schemas/PostCheckin"
+      discriminator:
+        propertyName: kind
+        mapping:
+          gate: "#/components/schemas/GateCheckin"
+          post: "#/components/schemas/PostCheckin"
+
+    GateCheckin:
+      type: object
+      required: [kind]
+      properties:
+        kind: { const: gate }
+        sleep:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 14
+          multipleOf: 0.5
+          description: Hours slept — not the 1–5 Hooper scale; the server converts.
+        stress: { type: [integer, "null"], minimum: 1, maximum: 5 }
+        fatigue: { type: [integer, "null"], minimum: 1, maximum: 5 }
+        soreness: { type: [integer, "null"], minimum: 1, maximum: 5 }
+        prs: { type: [integer, "null"], minimum: 0, maximum: 10, description: Perceived recovery status. }
+        pain: { type: boolean, default: false }
+        pain_where: { type: [string, "null"], description: Muscle slug. }
+        note: { type: [string, "null"], maxLength: 500 }
+
+    PostCheckin:
+      type: object
+      required: [kind, round_key]
+      properties:
+        kind: { const: post }
+        round_key: { type: string }
+        srpe: { type: [integer, "null"], minimum: 0, maximum: 10 }
+        rir: { type: [integer, "null"], minimum: 0, maximum: 3 }
+        stopper: { $ref: "#/components/schemas/Stopper" }
+        reps: { type: [integer, "null"], description: "Reps actually completed, if different." }
+        muscle_soreness:
+          type: object
+          description: Only muscles worked in that round; each 1–5, higher is worse.
+          additionalProperties:
+            type: integer
+            minimum: 1
+            maximum: 5
+        note: { type: [string, "null"], maxLength: 500 }
+
+    Checkin:
+      type: object
+      required: [id, kind, at]
+      properties:
+        id: { type: integer }
+        kind: { $ref: "#/components/schemas/CheckinKind" }
+        at: { type: string, format: date-time }
+        local_date: { type: [string, "null"], format: date }
+        round_key: { type: [string, "null"] }
+        sleep: { type: [integer, "null"] }
+        stress: { type: [integer, "null"] }
+        fatigue: { type: [integer, "null"] }
+        soreness: { type: [integer, "null"] }
+        prs: { type: [integer, "null"] }
+        pain: { type: boolean }
+        pain_where: { type: [string, "null"] }
+        srpe: { type: [integer, "null"] }
+        rir: { type: [integer, "null"] }
+        stopper: { type: [string, "null"] }
+        per_muscle:
+          type: [object, "null"]
+          additionalProperties:
+            type: integer
+        readiness: { type: [number, "null"] }
+
+    CheckinResult:
+      type: object
+      required: [ok, checkin]
+      properties:
+        ok: { type: boolean }
+        checkin: { $ref: "#/components/schemas/Checkin" }
+        readiness: { $ref: "#/components/schemas/Readiness" }
+        moved:
+          type: array
+          description: Which muscles the answer moved, and by how much.
+          items:
+            type: object
+            properties:
+              slug: { type: string }
+              name: { type: string }
+              wear: { type: number }
+              soreness: { type: number }
+              k_before: { type: number }
+              k_after: { type: number }
+
+    # ---------------------------------------------------------------- muscles
+    MuscleState:
+      type: object
+      required: [slug, name, region, sort, wear, soreness, load, stop_at, resume_at]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        region: { type: string }
+        sort: { type: integer }
+        wear: { type: number, minimum: 0, maximum: 100 }
+        soreness: { type: number, minimum: 0, maximum: 100 }
+        load: { type: number, minimum: 0, maximum: 100, description: "max(wear, soreness)." }
+        stop_at: { type: number }
+        stop_effective:
+          type: number
+          description: The stop line after current readiness is applied.
+        resume_at: { type: number }
+        last_loaded_at: { type: [string, "null"], format: date-time }
+        resting: { type: boolean }
+        rest_until: { type: [string, "null"], format: date-time }
+
+    MuscleDetail:
+      allOf:
+        - $ref: "#/components/schemas/MuscleState"
+        - type: object
+          required: [attribution]
+          properties:
+            attribution:
+              type: array
+              items: { $ref: "#/components/schemas/LibraryRow" }
+
+    MusclePatch:
+      type: object
+      minProperties: 1
+      properties:
+        wear: { type: number, minimum: 0, maximum: 100 }
+        soreness: { type: number, minimum: 0, maximum: 100 }
+        stop_at: { type: number, minimum: 0, maximum: 100 }
+        resume_at: { type: number, minimum: 0, maximum: 100 }
+        rest_until: { type: [string, "null"], format: date-time }
+        reason: { type: string, maxLength: 200 }
+
+    LibraryRow:
+      type: object
+      required: [exercise_slug, muscle_slug, role, weight, k, exposure]
+      properties:
+        exercise_slug: { type: string }
+        muscle_slug: { type: string }
+        muscle_name: { type: string }
+        role: { $ref: "#/components/schemas/StorageRole" }
+        weight: { type: number }
+        k: { type: number, description: Learned cost per rep. }
+        exposure: { type: integer }
+
+    # ---------------------------------------------------------------- profile
+    ProfileParam:
+      type: object
+      required: [key, value, prior, n, updated_at]
+      properties:
+        key: { type: string }
+        value: { type: number }
+        prior: { type: number }
+        n: { type: integer }
+        updated_at: { type: string, format: date-time }
+
+    CalibrationPoint:
+      type: object
+      required: [checkin, error]
+      properties:
+        checkin: { type: integer }
+        error: { type: number }
+
+    Profile:
+      type: object
+      required: [params, calibration]
+      properties:
+        params:
+          type: array
+          items: { $ref: "#/components/schemas/ProfileParam" }
+        calibration:
+          type: object
+          required: [n]
+          properties:
+            mae: { type: [number, "null"] }
+            n: { type: integer }
+            series:
+              type: array
+              items: { $ref: "#/components/schemas/CalibrationPoint" }
+
+    ProfileHistoryRow:
+      type: object
+      required: [id, at, key, value, n]
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        key: { type: string }
+        value: { type: number }
+        previous: { type: [number, "null"] }
+        n: { type: integer }
+        reason: { type: [string, "null"] }
+
+    RefitResult:
+      type: object
+      required: [ok, changed]
+      properties:
+        ok: { type: boolean }
+        changed:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              previous: { type: number }
+              value: { type: number }
+        half_life: { type: number }
+
+    # ---------------------------------------------------------------- calendar
+    CalendarDay:
+      type: object
+      required: [rounds, done, reps, ratio]
+      properties:
+        rounds: { type: integer }
+        done: { type: integer }
+        reps: { type: integer }
+        ratio: { type: number, minimum: 0, maximum: 1 }
+        by_ex:
+          type: object
+          additionalProperties:
+            type: integer
+
+    CalendarMonth:
+      type: object
+      required: [month, label, days, target, reps, ratio, current]
+      properties:
+        month: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
+        label: { type: string, examples: ["Nov"] }
+        year: { type: integer }
+        days: { type: integer }
+        target: { type: integer }
+        reps: { type: integer }
+        ratio: { type: number }
+        current: { type: boolean }
+
+    Months:
+      type: object
+      required: [rounds_per_day, base_reps, current, history]
+      properties:
+        rounds_per_day: { type: integer }
+        base_reps: { type: integer }
+        current: { $ref: "#/components/schemas/CalendarMonth" }
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/CalendarMonth" }
+
+    Calendar:
+      type: object
+      required: [days, today, start, max_reps, months]
+      properties:
+        days:
+          type: object
+          description: Keyed by local date.
+          additionalProperties: { $ref: "#/components/schemas/CalendarDay" }
+        today: { type: string, format: date }
+        start: { type: string, format: date }
+        max_reps: { type: integer }
+        months: { $ref: "#/components/schemas/Months" }
+
+    # ---------------------------------------------------------------- dashboard
+    DashboardSectionName:
+      type: string
+      enum:
+        - server_time
+        - settings
+        - clock
+        - next_set
+        - current_round
+        - next_assignment
+        - lifetime
+        - recent_rounds
+        - calendar
+        - months
+        - muscles
+        - readiness
+        - checkin_todo
+        - profile
+        - selection
+        - unattributed
+
+    RecentRound:
+      type: object
+      required: [round_key, status, at, local, day, items]
+      properties:
+        round_key: { type: string }
+        status: { $ref: "#/components/schemas/RoundStatus" }
+        at: { type: string, format: date-time }
+        local: { type: string }
+        day: { type: string, examples: ["14 Nov"] }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              reps: { type: integer }
+
+    Lifetime:
+      type: object
+      required: [total_reps, sets_done, sets_missed, exercises]
+      properties:
+        total_reps: { type: integer }
+        sets_done: { type: integer }
+        sets_missed: { type: integer }
+        started_at: { type: [string, "null"], format: date-time }
+        exercises:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              reps: { type: integer }
+              retired: { type: boolean }
+
+    Selection:
+      type: object
+      required: [deload, ranked]
+      properties:
+        deload: { type: boolean, description: True when every group is near capacity. }
+        blocked:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              why: { type: string }
+        ranked:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              load: { type: number }
+              why: { type: string }
+              joined: { type: boolean, description: Part of the current assignment. }
+
+    UnattributedExercise:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+
+    Dashboard:
+      type: object
+      required: [server_time]
+      properties:
+        server_time: { $ref: "#/components/schemas/ServerTime" }
+        settings: { $ref: "#/components/schemas/Settings" }
+        clock: { $ref: "#/components/schemas/Clock" }
+        next_set:
+          oneOf:
+            - $ref: "#/components/schemas/NextSet"
+            - type: "null"
+        current_round:
+          oneOf:
+            - $ref: "#/components/schemas/Round"
+            - type: "null"
+        round_open: { type: boolean }
+        next_assignment:
+          type: array
+          items: { $ref: "#/components/schemas/AssignmentItem" }
+        lifetime: { $ref: "#/components/schemas/Lifetime" }
+        recent_rounds:
+          type: array
+          items: { $ref: "#/components/schemas/RecentRound" }
+        calendar: { $ref: "#/components/schemas/Calendar" }
+        months: { $ref: "#/components/schemas/Months" }
+        muscles:
+          type: array
+          items: { $ref: "#/components/schemas/MuscleState" }
+        readiness: { $ref: "#/components/schemas/Readiness" }
+        checkin_todo: { $ref: "#/components/schemas/CheckinTodo" }
+        profile: { $ref: "#/components/schemas/Profile" }
+        selection: { $ref: "#/components/schemas/Selection" }
+        unattributed:
+          type: array
+          items: { $ref: "#/components/schemas/UnattributedExercise" }
+        etag: { type: string }
+
+    # ---------------------------------------------------------------- meta / auth
+    Meta:
+      type: object
+      required: [version, muscles, library, enums, server_time]
+      properties:
+        version: { type: string }
+        server_time: { $ref: "#/components/schemas/ServerTime" }
+        muscles:
+          type: array
+          description: The 22 groups in display order.
+          items:
+            type: object
+            required: [slug, name, region, sort]
+            properties:
+              slug: { type: string }
+              name: { type: string }
+              region: { type: string }
+              sort: { type: integer }
+        library:
+          type: array
+          description: Movements the engine can attribute, with their muscle map.
+          items:
+            type: object
+            required: [slug, name, muscles]
+            properties:
+              slug: { type: string }
+              name: { type: string }
+              muscles:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    muscle_slug: { type: string }
+                    role: { $ref: "#/components/schemas/StorageRole" }
+                    weight: { type: number }
+        enums:
+          type: object
+          required: [round_status, checkin_kind, stopper, storage_role]
+          properties:
+            round_status: { type: array, items: { $ref: "#/components/schemas/RoundStatus" } }
+            checkin_kind: { type: array, items: { $ref: "#/components/schemas/CheckinKind" } }
+            stopper: { type: array, items: { $ref: "#/components/schemas/Stopper" } }
+            storage_role: { type: array, items: { $ref: "#/components/schemas/StorageRole" } }
+
+    PairInput:
+      type: object
+      required: [code, device_name]
+      properties:
+        code: { type: string, pattern: "^[0-9]{8}$" }
+        device_name: { type: string, maxLength: 60, examples: ["Pixel 9"] }
+        device_model: { type: string, maxLength: 60 }
+        platform: { type: string, enum: [android, ios, cli] }
+
+    TokenRotateInput:
+      type: object
+      required: [device_id]
+      properties:
+        device_id: { type: string }
+
+    TokenResponse:
+      type: object
+      required: [device_id, token, expires_at]
+      properties:
+        device_id: { type: string }
+        token: { type: string, description: Shown once; store it in the Keystore. }
+        expires_at: { type: string, format: date-time }
+        device: { $ref: "#/components/schemas/Device" }
+
+    Device:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        model: { type: [string, "null"] }
+        platform: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+        push_enabled: { type: boolean }
+
+    DeviceRegistration:
+      type: object
+      required: [token, platform]
+      properties:
+        token: { type: string, description: FCM registration token. }
+        platform: { type: string, enum: [android, ios, web] }
+        name: { type: string, maxLength: 60 }
