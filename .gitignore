@@ -27,3 +27,7 @@ node_modules/
 dist/
 .vitest/
 *.tsbuildinfo
+.use-api
+.restart-request-api
+api.log
+apps/*/dist/

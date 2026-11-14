@@ -9,7 +9,9 @@
   "scripts": {
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "engine": "pnpm --filter @getfit/engine"
+    "engine": "pnpm --filter @getfit/engine",
+    "build": "pnpm --filter @getfit/server build",
+    "ci": "bash scripts/ci.sh"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

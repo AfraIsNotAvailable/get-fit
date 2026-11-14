@@ -1,0 +1,20 @@
+[Unit]
+Description=get-fit API (workout stack)
+Documentation=file:///home/afra/get-fit/docs/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=afra
+Group=afra
+WorkingDirectory=/home/afra/get-fit
+EnvironmentFile=/etc/getfit/api.env
+ExecStart=/home/afra/.local/node24/bin/node /home/afra/get-fit/apps/server/dist/main.js
+Restart=always
+RestartSec=2
+StandardOutput=append:/home/afra/get-fit/api.log
+StandardError=append:/home/afra/get-fit/api.log
+
+[Install]
+WantedBy=multi-user.target

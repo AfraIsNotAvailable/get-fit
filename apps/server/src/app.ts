@@ -1,14 +1,23 @@
-/** Express 5 wrapper: parse, call one service, pick a status. No rules here. */
+/** Express 5 wrapper: parse (contracts), call one service, pick a status. */
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
-import { HttpError, type Services } from "./service.js";
+import {
+  CheckinInput, ConfirmationInput, PairInput, SettingsInput, ValidationError, parseOrThrow,
+} from "@getfit/contracts";
+import type { Device } from "@getfit/db";
+import type { AuthService } from "./auth.js";
+import { HttpError, type CheckinBody, type Services } from "./service.js";
 
 export interface AppOptions {
   requireToken?: boolean;
   webRoot?: string | null;
+  schedulerEnabled?: boolean;
 }
 
-const problem = (res: Response, status: number, code: string, title: string, extra: object = {}) =>
+const problem = (
+  res: Response, status: number, code: string, title: string,
+  extra: Record<string, unknown> = {},
+) =>
   res.status(status).type("application/problem+json").json({
     type: `https://fit.afrasinei.dev/problems/${code}`,
     title,
@@ -22,8 +31,9 @@ function parseSections(raw: unknown): string[] | undefined {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-export function createApp(services: Services, options: AppOptions = {}): express.Express {
+export function createApp(services: Services, auth: AuthService, options: AppOptions = {}): express.Express {
   const app = express();
+  const requireToken = options.requireToken ?? true;
   app.disable("x-powered-by");
   app.use(express.json({ limit: "64kb" }));
 
@@ -35,36 +45,69 @@ export function createApp(services: Services, options: AppOptions = {}): express
     next();
   });
 
-  if (options.requireToken) {
-    app.use("/api/", (req, res, next) => {
-      const header = req.get("authorization") ?? "";
-      if (!header.startsWith("Bearer ")) {
-        return problem(res, 401, "unauthorized", "A bearer token is required");
-      }
-      next();
-    });
-  }
+  const deviceOf = (res: Response): Device => res.locals.device as Device;
+
+  const requireDevice = (req: Request, res: Response, next: NextFunction) => {
+    if (!requireToken) {
+      res.locals.device = { deviceId: "local", tokenId: "local", name: "local", platform: "cli" } as Device;
+      return next();
+    }
+    const header = req.get("authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    const device = token ? auth.verify(token) : null;
+    if (!device) return problem(res, 401, "unauthorized", "A valid bearer token is required");
+    res.locals.device = device;
+    next();
+  };
+
+  // ------------------------------------------------------------- public
 
   app.get("/api/v1/health", (_req, res) => {
     res.json({
       ok: true,
       version: "0.1.0",
-      db: { ok: true, path: "configured", schemaVersion: 1 },
-      scheduler: { enabled: true },
+      db: { ok: true, schemaVersion: 2, readOnly: services.isReadOnly },
+      scheduler: { enabled: options.schedulerEnabled ?? !services.isReadOnly },
     });
   });
 
   app.get("/api/v1/meta", (_req, res) => res.json(services.meta()));
 
-  app.get("/api/v1/now", (_req, res) => {
-    res.json(services.dashboard(["serverTime"]).body.serverTime);
+  app.post("/api/v1/auth/pair", (req, res) => {
+    const body = parseOrThrow(PairInput, req.body ?? {});
+    const issued = auth.pair(body);
+    if (!issued) {
+      return problem(res, 401, "pairing_failed", "that code is unknown, expired or already used");
+    }
+    return res.status(201).json({
+      deviceId: issued.deviceId,
+      token: issued.token,
+      name: issued.name,
+      expiresAt: issued.expiresAt,
+    });
   });
+
+  // ------------------------------------------------------------- authenticated
+
+  app.use("/api/v1", (req, res, next) => {
+    if (req.path === "/health" || req.path === "/meta" || req.path === "/auth/pair") return next();
+    return requireDevice(req, res, next);
+  });
+
+  app.get("/api/v1/auth/me", (_req, res) => res.json(deviceOf(res)));
+
+  app.delete("/api/v1/auth/me", (_req, res) => {
+    auth.revoke(deviceOf(res));
+    res.status(204).end();
+  });
+
+  app.get("/api/v1/now", (_req, res) => res.json(services.dashboard(["serverTime"]).body.serverTime));
 
   app.get("/api/v1/dashboard", (req, res) => {
     const { body, etag } = services.dashboard(parseSections(req.query.sections));
     res.setHeader("etag", etag);
     if (req.get("if-none-match") === etag) return res.status(304).end();
-    res.json(body);
+    return res.json(body);
   });
 
   app.get("/api/v1/rounds", (req, res) => {
@@ -75,8 +118,8 @@ export function createApp(services: Services, options: AppOptions = {}): express
   app.get("/api/v1/rounds/:key", (req, res) => res.json(services.round(req.params.key)));
 
   app.post("/api/v1/rounds/:key/confirm", (req, res) => {
-    const source = String(req.body?.source ?? "web");
-    const outcome = services.confirm(req.params.key, source);
+    const body = parseOrThrow(ConfirmationInput, req.body ?? {});
+    const outcome = services.confirm(req.params.key, body.source);
     res.json({
       roundKey: outcome.round.key,
       status: outcome.round.status,
@@ -88,12 +131,11 @@ export function createApp(services: Services, options: AppOptions = {}): express
   app.get("/api/v1/checkins/todo", (_req, res) => res.json(services.checkinTodo()));
 
   app.post("/api/v1/checkins", (req, res) => {
-    const result = services.checkin(req.body ?? {});
-    res.status(201).json(result);
+    const body = parseOrThrow(CheckinInput, req.body ?? {});
+    res.status(201).json(services.checkin(body as CheckinBody));
   });
 
   app.get("/api/v1/muscles", (_req, res) => res.json(services.dashboard(["muscles"]).body.muscles));
-
   app.get("/api/v1/profile", (_req, res) => res.json(services.dashboard(["profile"]).body.profile));
 
   app.get("/api/v1/calendar", (_req, res) => {
@@ -101,29 +143,41 @@ export function createApp(services: Services, options: AppOptions = {}): express
     res.json({ ...body.calendar, months: body.months });
   });
 
-  app.get("/api/v1/settings", (_req, res) => {
-    const body = services.dashboard(["settings"]).body;
-    res.json(body.settings);
+  app.get("/api/v1/settings", (_req, res) => res.json(services.dashboard(["settings"]).body.settings));
+
+  app.put("/api/v1/settings", (req, res) => {
+    const body = parseOrThrow(SettingsInput, req.body ?? {});
+    res.json(services.saveSettings({
+      timezone: body.timezone,
+      intervalMinutes: body.intervalMinutes,
+      responseMinutes: body.responseMinutes,
+      quietStart: body.quietStart,
+      quietEnd: body.quietEnd,
+      exercises: body.exercises.map((exercise) => ({
+        id: exercise.id ?? null,
+        name: exercise.name,
+        min: exercise.min,
+        max: exercise.max ?? null,
+        formUrl: exercise.formUrl || null,
+      })),
+    }));
   });
 
-  app.put("/api/v1/settings", (req, res) => res.json(services.saveSettings(req.body)));
-
-  if (options.webRoot) {
-    app.use(express.static(options.webRoot, { index: "index.html" }));
-  }
+  if (options.webRoot) app.use(express.static(options.webRoot, { index: "index.html" }));
 
   app.use((_req, res) => problem(res, 404, "not_found", "No such route"));
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof ValidationError) {
+      return problem(res, 422, "validation_failed", error.message, { errors: error.issues });
+    }
     if (error instanceof HttpError) {
-      return problem(res, error.status, error.code, error.message, error.current === undefined
-        ? {}
-        : { current: error.current });
+      return problem(res, error.status, error.code, error.message,
+        error.current === undefined ? {} : { current: error.current });
     }
     if (error instanceof SyntaxError) {
       return problem(res, 400, "bad_json", "The request body is not valid JSON");
     }
-    // eslint-disable-next-line no-console
     console.error("[getfit] unhandled", error);
     return problem(res, 500, "internal_error", "Something broke");
   });

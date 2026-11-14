@@ -196,3 +196,16 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 
 CREATE INDEX IF NOT EXISTS idx_devices_token ON devices(token_id);
 CREATE INDEX IF NOT EXISTS idx_notification_log_at ON notification_log(at);
+
+-- one-shot codes the CLI hands out so a phone can mint its own token
+CREATE TABLE IF NOT EXISTS pairing_codes (
+  code_hash TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  model TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pairing_expires ON pairing_codes(expires_at);

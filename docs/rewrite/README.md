@@ -254,9 +254,16 @@ named test in `packages/engine/test/parity.test.ts`.
   keeps the sign where Python's wraps, so a quiet window crossing midnight inflated the monthly ceiling
   from 3000 to 7800; and with decay now pure, `view()` has to decay for itself instead of trusting a
   previous read to have persisted it.
-- **Still open:** auth/tokens, the Telegram notifier in the scheduler, the `/dev/*` surface, contracts →
-  generated OpenAPI + clients, and the web app.
-- **Next:** `packages/contracts` (zod → emitted `openapi.yaml` → TS client) and `apps/web`.
+- **Cutover blocks closed** (all local, all tested): `packages/contracts` validates every mutating body
+  with zod and returns 422 with field paths; device tokens are real (8-digit pairing codes, SHA-256
+  stored, revocable, 401 without one); the scheduler publishes `RoundOpened` through a notifier adapter
+  (Telegram or console) and logs every delivery to `notification_log`; and the deploy path learned a
+  second mode keyed on `.use-api`, with `deploy/getfit-api.*` units, `scripts/install-node.sh`,
+  `scripts/ci.sh` and `scripts/cutover.sh shadow|live|rollback`.
+- **60 tests green** (engine 26, contracts 7, db 4, server 23).
+- **Still open before `live`:** a Node 24 runtime on the Pi host (Debian ships 20 — `install-node.sh`
+  handles it), the Cloudflare Access bypass for `/api/*`, and a few days of shadow running. Then the web
+  app; `/dev/*` and the generated OpenAPI/clients come with it.
 
 A note on the plan that changed while implementing: `better-sqlite3` is replaced by **`node:sqlite`**
 (`DatabaseSync`), which ships with Node 24 — no native build, no prebuilt-binary risk on arm64, and the

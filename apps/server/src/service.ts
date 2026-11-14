@@ -65,7 +65,18 @@ export class Services {
   constructor(
     readonly db: Db,
     private readonly clock: () => Date = () => new Date(),
+    readonly readOnly = false,
   ) {}
+
+  get isReadOnly(): boolean {
+    return this.readOnly;
+  }
+
+  private guard(): void {
+    if (this.readOnly) {
+      throw new HttpError(503, "read_only", "this instance is a read-only shadow of the live database");
+    }
+  }
 
   now(): Date {
     return this.clock();
@@ -128,6 +139,7 @@ export class Services {
   // ---------------------------------------------------------------- writes
 
   tick(force = false): TickOutcome {
+    this.guard();
     return withImmediate(this.db, () => {
       const now = this.now();
       const before = this.snapshot(now);
@@ -142,6 +154,7 @@ export class Services {
   }
 
   confirm(key: string, source: string): ConfirmOutcome {
+    this.guard();
     return withImmediate(this.db, () => {
       const now = this.now();
       const snap = this.snapshot(now);
@@ -170,6 +183,7 @@ export class Services {
   }
 
   checkin(body: CheckinBody): unknown {
+    this.guard();
     return withImmediate(this.db, () => {
       const now = this.now();
       const snap = this.snapshot(now);
@@ -208,6 +222,7 @@ export class Services {
   }
 
   saveSettings(input: SettingsInput): unknown {
+    this.guard();
     return withImmediate(this.db, () => dbSaveSettings(this.db, input, this.now()));
   }
 }

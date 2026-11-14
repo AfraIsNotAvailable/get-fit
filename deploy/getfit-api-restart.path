@@ -1,0 +1,11 @@
+[Unit]
+Description=get-fit: restart the API when a deploy requests it
+
+[Path]
+# deploy.sh runs inside the Hermes container (its own PID namespace) and cannot
+# signal this unit, so it drops this marker instead.
+PathExists=/home/afra/get-fit/.restart-request-api
+Unit=getfit-api-restart.service
+
+[Install]
+WantedBy=paths.target

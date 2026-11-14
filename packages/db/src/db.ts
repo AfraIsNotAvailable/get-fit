@@ -47,9 +47,16 @@ export function migrate(db: Db): { added: string[] } {
 
   const row = db.prepare("SELECT MAX(version) v FROM schema_migrations").get() as { v: number | null };
   const version = row?.v ?? 0;
+  const now = new Date().toISOString();
   if (version < 1) {
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at, name) VALUES (?, ?, ?)")
-      .run(1, new Date().toISOString(), "baseline");
+      .run(1, now, "baseline");
+  }
+  if (version < 2) {
+    // v2 is additive: api_tokens / devices / notification_log / idempotency_keys
+    // / pairing_codes all arrive through CREATE TABLE IF NOT EXISTS above
+    db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at, name) VALUES (?, ?, ?)")
+      .run(2, now, "api tokens, devices, pairing codes, notification log");
   }
   return { added };
 }

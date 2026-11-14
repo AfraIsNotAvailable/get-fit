@@ -139,6 +139,47 @@ behave like the old one, and verify the following one.
 Upgrading is `git push` from the development machine: the runner pulls, tests, restarts (the kill *is*
 the restart — systemd brings it back in about two seconds) and health-checks.
 
+## Cutover to the API (prepared, not applied)
+
+The Node API lives in `apps/server`; **nothing on this Pi runs it yet**. The switch is
+`scripts/cutover.sh`, in two phases, with a third to undo it.
+
+**Prerequisite: a Node 24 runtime.** Debian 13 ships Node 20 and `node:sqlite` needs >= 22.5, so
+`scripts/install-node.sh` drops the official arm64 tarball into `~/.local/node24` — no apt, no root —
+and the unit points at that binary.
+
+**`./scripts/cutover.sh shadow`** installs three units (`getfit-api.service`, `getfit-api-restart.path`,
+`getfit-api-restart.service`), writes `/etc/getfit/api.env` from `deploy/api.env.example` with
+`GETFIT_READ_ONLY=1` and `SCHEDULER=off`, runs `scripts/ci.sh`, and starts the API on
+`127.0.0.1:8787`. It writes nothing to the live database and changes nothing public. It can sit there
+for days; `python3 tools/parity.py /home/afra/get-fit/getfit.db` diffs it against `getfit.view()` at any
+time.
+
+**`./scripts/cutover.sh live`** flips `api.env` to read-write with the scheduler on, disables
+`getfit.service`, repoints the cloudflared rule for `fit.afrasinei.dev` from `:8777` to `:8787`, and
+creates `.use-api`.
+
+**`./scripts/cutover.sh rollback`** stops the API, re-enables the Python unit, puts the tunnel back on
+`:8777`, and removes `.use-api`.
+
+**How a deploy changes.** `scripts/deploy.sh` reads `.use-api`. Without it nothing changes: Python
+tests, `getfit.service`, health on `/api/state`. With it, the same script runs `scripts/ci.sh` (install,
+vitest, esbuild bundle into `apps/server/dist`), then drops `.restart-request-api`, which
+`getfit-api-restart.path` turns into `systemctl restart getfit-api`. A failing test suite rolls the code
+back before the service is touched, exactly as today. `ci.sh` falls back to `npx --yes pnpm@12.15.0`
+because the runner lives in the Hermes container, which has node but not pnpm.
+
+**Still open before `live`:**
+
+- **Cloudflare Access still gates `/api/*`.** A browser gets through; a phone cannot. The Access
+  application needs a bypass policy for `fit.afrasinei.dev/api/*` — do it from the machine with the `cf`
+  CLI, since `cloudflared` here has no origin certificate.
+- **Tokens must be minted before the app can talk to it.** `node apps/server/dist/cli.js token create
+  --name "Pixel 9"` prints one; `pair-code` hands out an 8-digit code the phone exchanges at
+  `/api/v1/auth/pair`.
+- The Python unit and the `.restart-request` mechanism stay installed after cutover, so rollback is a
+  command rather than a rebuild.
+
 ## Where the thinking lives
 
 - `docs/fatigue-model-research.md` — the research brief: frameworks that already exist, what the

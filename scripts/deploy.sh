@@ -12,12 +12,27 @@
 #   GETFIT_HOME  checkout to deploy          (default: parent of this script)
 #   GETFIT_PORT  dashboard port              (default 8777)
 #   GETFIT_BRANCH branch to deploy           (default main)
+#   GETFIT_API_PORT  API port in api mode    (default 8787)
+#
+# Two modes, chosen by the `.use-api` marker file in the checkout:
+#   legacy  the Python dashboard (getfit.service) — the default, and what the
+#           Pi ran until the cutover
+#   api     the Node API (getfit-api.service): scripts/ci.sh installs, tests and
+#           builds, and a marker file asks the host to restart the unit
+# A deploy never switches modes by itself: the marker is created by
+# scripts/cutover.sh and by nothing else.
 set -euo pipefail
 
 APP="${GETFIT_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PORT="${GETFIT_PORT:-8777}"
 BRANCH="${GETFIT_BRANCH:-main}"
 PY="${GETFIT_PY:-$(command -v python3)}"
+
+MODE=legacy
+if [ -e "$APP/.use-api" ]; then
+  MODE=api
+  PORT="${GETFIT_API_PORT:-8787}"
+fi
 cd "$APP"
 
 say() { printf '[deploy] %s\n' "$*"; }
@@ -66,8 +81,28 @@ restart_server() {
   fi
 }
 
+restart_api() {
+  say "requesting an API restart via .restart-request-api"
+  : > "$APP/.restart-request-api"
+  for _ in $(seq 1 40); do
+    [ -e "$APP/.restart-request-api" ] || { say "supervisor restarted the API"; return 0; }
+    sleep 0.25
+  done
+  rm -f "$APP/.restart-request-api"
+  say "the restart request was not picked up"
+  return 1
+}
+
+restart_service() {
+  if [ "$MODE" = api ]; then restart_api; else restart_server; fi
+}
+
 healthy() {
-  curl -sf -m 2 -o /dev/null "http://127.0.0.1:$PORT/api/state"
+  if [ "$MODE" = api ]; then
+    curl -sf -m 2 -o /dev/null "http://127.0.0.1:$PORT/api/v1/health"
+  else
+    curl -sf -m 2 -o /dev/null "http://127.0.0.1:$PORT/api/state"
+  fi
 }
 
 wait_healthy() {
@@ -91,7 +126,7 @@ if [ "$PREV" = "$TARGET" ]; then
     exit 0
   fi
   say "nothing to deploy but the dashboard is down — restarting"
-  restart_server
+  restart_service
   wait_healthy && { say "healthy on :$PORT"; exit 0; }
   say "dashboard did not come back up"
   exit 1
@@ -110,15 +145,25 @@ git reset --hard --quiet "$TARGET"
 restore_db
 trap - EXIT
 
-say "tests"
-if ! "$PY" tests.py >"${TMPDIR:-/tmp}/getfit-tests.log" 2>&1; then
-  tail -25 "${TMPDIR:-/tmp}/getfit-tests.log" >&2
-  say "tests failed — code back to $(git rev-parse --short "$PREV"), service untouched"
-  git reset --hard --quiet "$PREV"
-  exit 1
+if [ "$MODE" = api ]; then
+  say "install, test, build"
+  if ! "$APP/scripts/ci.sh" >"${TMPDIR:-/tmp}/getfit-ci.log" 2>&1; then
+    tail -40 "${TMPDIR:-/tmp}/getfit-ci.log" >&2
+    say "ci failed — code back to $(git rev-parse --short "$PREV"), service untouched"
+    git reset --hard --quiet "$PREV"
+    exit 1
+  fi
+else
+  say "tests"
+  if ! "$PY" tests.py >"${TMPDIR:-/tmp}/getfit-tests.log" 2>&1; then
+    tail -25 "${TMPDIR:-/tmp}/getfit-tests.log" >&2
+    say "tests failed — code back to $(git rev-parse --short "$PREV"), service untouched"
+    git reset --hard --quiet "$PREV"
+    exit 1
+  fi
 fi
 
-restart_server
+restart_service
 if wait_healthy; then
   say "deployed $(git rev-parse --short "$TARGET"), healthy on :$PORT"
   exit 0
@@ -126,6 +171,12 @@ fi
 
 say "health check failed — rolling code back to $(git rev-parse --short "$PREV")"
 git reset --hard --quiet "$PREV"
-restart_server
-say "rolled back; investigate server.log"
+if [ "$MODE" = api ]; then
+  "$APP/scripts/ci.sh" >"${TMPDIR:-/tmp}/getfit-ci.log" 2>&1 || true
+  restart_api || true
+  say "rolled back; investigate api.log"
+else
+  restart_server
+  say "rolled back; investigate server.log"
+fi
 exit 1

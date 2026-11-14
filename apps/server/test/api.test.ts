@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { initFresh, migrate, openDatabase, type Db } from "@getfit/db";
 import { createApp } from "../src/app.js";
+import { AuthService } from "../src/auth.js";
 import { Services } from "../src/service.js";
 
 const NOW = new Date("2026-11-14T08:00:00Z"); // 10:00 Bucharest, outside quiet hours
@@ -39,7 +40,8 @@ beforeAll(async () => {
   db.prepare("UPDATE app_state SET next_set_at = ? WHERE id = 1")
     .run(NOW.toISOString().replace(/\.\d{3}Z$/, "Z"));
   services = new Services(db, () => NOW);
-  const app = createApp(services);
+  const auth = new AuthService(db, () => NOW);
+  const app = createApp(services, auth, { requireToken: false });
   server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

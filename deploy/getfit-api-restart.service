@@ -1,0 +1,6 @@
+[Unit]
+Description=get-fit: bounce the API for a deploy
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "rm -f /home/afra/get-fit/.restart-request-api; systemctl restart getfit-api.service"

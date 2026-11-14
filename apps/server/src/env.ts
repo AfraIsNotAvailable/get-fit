@@ -6,7 +6,10 @@ export interface Config {
   scheduler: boolean;
   dev: boolean;
   requireToken: boolean;
+  readOnly: boolean;
   webRoot: string | null;
+  telegramBotToken: string | null;
+  telegramChatId: string | null;
 }
 
 function flag(value: string | undefined, fallback: boolean): boolean {
@@ -21,7 +24,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: Number(env.GETFIT_PORT ?? 8787),
     scheduler: flag(env.SCHEDULER, true),
     dev: flag(env.GETFIT_DEV, false),
-    requireToken: flag(env.GETFIT_REQUIRE_TOKEN, false),
+    // auth is on unless explicitly turned off: the API sits behind a bypass
+    requireToken: flag(env.GETFIT_REQUIRE_TOKEN, true),
+    readOnly: flag(env.GETFIT_READ_ONLY, false),
     webRoot: env.GETFIT_WEB ?? null,
+    telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? null,
+    telegramChatId: env.TELEGRAM_CHAT_ID ?? null,
   };
 }
