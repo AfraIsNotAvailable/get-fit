@@ -187,7 +187,14 @@ export function createApp(services: Services, auth: AuthService, options: AppOpt
     }));
   });
 
-  if (options.webRoot) app.use(express.static(options.webRoot, { index: "index.html" }));
+  if (options.webRoot) {
+    const root = options.webRoot;
+    app.use(express.static(root, { index: "index.html" }));
+    // The client picks its page from window.location.pathname, so /settings is the same
+    // document as /. Anything that is not an API route and not a file falls back to it;
+    // an unknown /api/* path must still answer problem+json, not HTML.
+    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile("index.html", { root }));
+  }
 
   app.use((_req, res) => problem(res, 404, "not_found", "No such route"));
 
