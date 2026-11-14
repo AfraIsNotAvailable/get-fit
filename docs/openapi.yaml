@@ -76,6 +76,7 @@ paths:
   /meta:
     get:
       tags: [meta]
+      security: []
       summary: Taxonomy, movement library and enum values
       description: |
         Everything a client needs to render without hard-coded vocabulary: the 22 muscle
@@ -100,8 +101,8 @@ paths:
       summary: Server time and clock state
       description: |
         The cheapest endpoint in the API. A native client polls this (or uses it to
-        correct its own clock) without pulling the dashboard. `quiet_now` mirrors the
-        quiet-window state, and `seconds_to_next_event` is the shortest of "next set"
+        correct its own clock) without pulling the dashboard. `quietNow` mirrors the
+        quiet-window state, and `secondsToNextEvent` is the shortest of "next set"
         and "response window closes" when either is scheduled.
       operationId: getNow
       responses:
@@ -199,6 +200,7 @@ paths:
       tags: [exercises]
       summary: List the stack (active and retired)
       operationId: listExercises
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       parameters:
         - name: active
           in: query
@@ -222,6 +224,7 @@ paths:
         movement the library does not know is still created, but it does not participate
         in the fatigue model and appears in `unattributed`.
       operationId: createExercise
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -250,6 +253,7 @@ paths:
       tags: [exercises]
       summary: Rename, re-dosage, reorder or re-link an exercise
       operationId: patchExercise
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       requestBody:
         required: true
         content:
@@ -270,9 +274,10 @@ paths:
       tags: [exercises]
       summary: Retire an exercise
       description: |
-        Never deletes rows: sets `active = 0` and `retired_at`. Rounds, rep history and
+        Never deletes rows: sets `active = 0` and `retiredAt`. Rounds, rep history and
         learned `k` survive, which is what keeps lifetime totals honest.
       operationId: retireExercise
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       responses:
         "204":
           description: Retired.
@@ -292,7 +297,7 @@ paths:
         - name: from
           in: query
           required: false
-          description: Inclusive lower bound on `sent_at`.
+          description: Inclusive lower bound on `sentAt`.
           schema: { type: string, format: date-time }
         - name: to
           in: query
@@ -322,6 +327,7 @@ paths:
         manual equivalent of a tick. Used by the settings screen's "send one now" and by
         tests. Refused with `409 round_already_open` if a round is pending.
       operationId: openRound
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -372,7 +378,7 @@ paths:
 
         - inside the response window → status `done`, bonus resets to 0;
         - after the deadline (or after it was already marked `missed`) → `late`, bonus 2;
-        - already resolved, or a `round_key` that is not the open round → `409`, with the
+        - already resolved, or a `roundKey` that is not the open round → `409`, with the
           current status in the problem body so the client reconciles instead of shouting.
 
         Returns the receipt text the Telegram hook posts today, plus the next set time.
@@ -393,7 +399,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Already resolved, or the status did not match `expected_status`.
+          description: Already resolved, or the status did not match `expectedStatus`.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -405,7 +411,7 @@ paths:
       description: |
         `post` when the response window after a resolved set is open and that set has not
         been answered yet (with the muscles it loaded and the seconds left), otherwise
-        `gate`. `gate_answered` lists today's already-answered questions so the client
+        `gate`. `gateAnswered` lists today's already-answered questions so the client
         hides only those.
       operationId: getCheckinTodo
       responses:
@@ -455,7 +461,7 @@ paths:
         One endpoint, two shapes, discriminated by `kind`. Every field except `kind` is
         optional — a partial answer is better than none, the model degrades gracefully.
 
-        A `post` answer must carry the `round_key` of a round whose response window is
+        A `post` answer must carry the `roundKey` of a round whose response window is
         still open and which has not been answered. Late, repeated, unknown-round or
         muscle-not-worked answers are `409` with a `code` — the four `CheckinRefused`
         reasons the current server returns as a bare sentence.
@@ -486,7 +492,7 @@ paths:
       tags: [muscles]
       summary: All 22 muscle groups with their current state
       description: |
-        `load` is `max(wear, soreness)` — the number that gates selection. `stop_effective`
+        `load` is `max(wear, soreness)` — the number that gates selection. `stopEffective`
         is the stop line after today's readiness is applied; it is what the client should
         paint against. Sorted by load, descending.
       operationId: listMuscles
@@ -520,9 +526,10 @@ paths:
       tags: [muscles]
       summary: Manual override of a muscle's state
       description: |
-        The `setwear` / `rest_until` escape hatch. Every field is optional; sending one
+        The `setwear` / `restUntil` escape hatch. Every field is optional; sending one
         records the override so a later `refit` does not silently undo it.
       operationId: patchMuscle
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       requestBody:
         required: true
         content:
@@ -662,6 +669,7 @@ paths:
       summary: Rotate the device token
       description: The previous token stays valid for five minutes, so a lost response is retryable.
       operationId: rotateToken
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       requestBody:
         required: true
         content:
@@ -705,6 +713,7 @@ paths:
       tags: [devices]
       summary: Register a push token
       operationId: registerDevice
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -731,6 +740,7 @@ paths:
       tags: [devices]
       summary: Unregister a push token
       operationId: unregisterDevice
+      deprecated: true   # not implemented: see docs/rewrite/contract-drift.md
       responses:
         "204":
           description: Unregistered.
@@ -864,32 +874,32 @@ components:
           properties:
             ok: { type: boolean }
             path: { type: string }
-            schema_version: { type: integer }
+            schemaVersion: { type: integer }
         scheduler:
           type: object
           properties:
             enabled: { type: boolean }
-            last_tick_at: { type: [string, "null"], format: date-time }
+            lastTickAt: { type: [string, "null"], format: date-time }
 
     ServerTime:
       type: object
-      required: [utc, local, timezone, quiet_now]
+      required: [utc, local, timezone, quietNow]
       properties:
         utc: { type: string, format: date-time }
         local:
           type: string
           description: Rendered in `timezone`, HH:MM:SS.
           examples: ["15:35:20"]
-        date_local: { type: string, format: date }
+        dateLocal: { type: string, format: date }
         timezone: { type: string, examples: ["Europe/Bucharest"] }
-        quiet_now: { type: boolean }
-        quiet_window:
+        quietNow: { type: boolean }
+        quietWindow:
           type: object
           required: [start, end]
           properties:
             start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
             end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
-        seconds_to_next_event:
+        secondsToNextEvent:
           type: [integer, "null"]
           description: Shortest of the next set and the closing response window.
 
@@ -899,7 +909,15 @@ components:
 
     CheckinKind:
       type: string
+      description: What a client may post.
       enum: [gate, post]
+
+    CheckinKindStored:
+      type: string
+      description: |
+        What a read can return. `anchor` rows are legacy baselines migrated from the
+        Python app; they are history, not something a client can create.
+      enum: [gate, post, anchor]
 
     StorageRole:
       type: string
@@ -913,13 +931,13 @@ components:
     # ---------------------------------------------------------------- settings
     Settings:
       type: object
-      required: [timezone, interval_minutes, response_minutes, quiet_start, quiet_end, exercises]
+      required: [timezone, intervalMinutes, responseMinutes, quietStart, quietEnd, exercises]
       properties:
         timezone: { type: string }
-        interval_minutes: { type: integer, minimum: 1, maximum: 1440 }
-        response_minutes: { type: integer, minimum: 1, maximum: 240 }
-        quiet_start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
-        quiet_end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        intervalMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        responseMinutes: { type: integer, minimum: 1, maximum: 240 }
+        quietStart: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        quietEnd: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
         exercises:
           type: array
           minItems: 1
@@ -927,13 +945,13 @@ components:
 
     SettingsInput:
       type: object
-      required: [timezone, interval_minutes, response_minutes, quiet_start, quiet_end, exercises]
+      required: [timezone, intervalMinutes, responseMinutes, quietStart, quietEnd, exercises]
       properties:
         timezone: { type: string }
-        interval_minutes: { type: integer, minimum: 1, maximum: 1440 }
-        response_minutes: { type: integer, minimum: 1, maximum: 240 }
-        quiet_start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
-        quiet_end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        intervalMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        responseMinutes: { type: integer, minimum: 1, maximum: 240 }
+        quietStart: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        quietEnd: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
         exercises:
           type: array
           minItems: 1
@@ -941,22 +959,22 @@ components:
 
     Exercise:
       type: object
-      required: [slug, name, min, max, active, position]
+      required: [id, name, min, max, active, position]
       properties:
-        slug: { type: string }
+        id: { type: [string, "null"], description: Null for a row being added. }
         name: { type: string, maxLength: 40 }
         min: { type: integer, minimum: 0, maximum: 500 }
         max:
           type: [integer, "null"]
           minimum: 0
           description: Null means uncapped — the bonus sink.
-        form_url:
+        formUrl:
           type: [string, "null"]
           format: uri
           description: The how-to article. A wrong one is worse than none; never guess.
         active: { type: boolean }
         position: { type: integer }
-        retired_at: { type: [string, "null"], format: date-time }
+        retiredAt: { type: [string, "null"], format: date-time }
         attributed: { type: boolean, description: False when the library does not know it. }
 
     ExerciseInput:
@@ -971,7 +989,7 @@ components:
         max:
           type: [integer, "null"]
           description: Ignored (forced to null) on the last exercise in the list.
-        form_url: { type: [string, "null"] }
+        formUrl: { type: [string, "null"] }
 
     ExercisePatch:
       type: object
@@ -980,35 +998,35 @@ components:
         name: { type: string, minLength: 1, maxLength: 40 }
         min: { type: integer, minimum: 0, maximum: 500 }
         max: { type: [integer, "null"] }
-        form_url: { type: [string, "null"] }
+        formUrl: { type: [string, "null"] }
         position: { type: integer, minimum: 0 }
 
     # ---------------------------------------------------------------- rounds
     RoundItem:
       type: object
-      required: [exercise_slug, exercise_name, reps]
+      required: [exerciseSlug, exerciseName, reps]
       properties:
-        exercise_slug: { type: string }
-        exercise_name: { type: string }
+        exerciseSlug: { type: string }
+        exerciseName: { type: string }
         reps: { type: integer, minimum: 0 }
 
     Round:
       type: object
-      required: [round_key, status, sent_at, deadline_at, target_reps, items]
+      required: [key, status, sentAt, deadlineAt, targetReps, items]
       properties:
-        round_key: { type: string, pattern: "^[a-f0-9]{12}$" }
+        key: { type: string, pattern: "^[a-f0-9]{12}$" }
         status: { $ref: "#/components/schemas/RoundStatus" }
-        sent_at: { type: string, format: date-time }
-        sent_local_date: { type: string, format: date }
-        deadline_at: { type: string, format: date-time }
-        resolved_at: { type: [string, "null"], format: date-time }
+        sentAt: { type: string, format: date-time }
+        sentLocalDate: { type: string, format: date }
+        deadlineAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
         source: { type: [string, "null"], examples: ["web", "android", "telegram", "cli"] }
-        target_reps: { type: integer }
-        bonus_applied: { type: integer }
+        targetReps: { type: integer }
+        bonusApplied: { type: integer }
         items:
           type: array
           items: { $ref: "#/components/schemas/RoundItem" }
-        seconds_left:
+        secondsLeft:
           type: [integer, "null"]
           description: Only for a pending round.
 
@@ -1019,7 +1037,7 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Round" }
-        next_cursor: { type: [string, "null"] }
+        nextCursor: { type: [string, "null"] }
 
     ConfirmationInput:
       type: object
@@ -1028,7 +1046,7 @@ components:
         source:
           type: string
           enum: [web, android, telegram, cli]
-        expected_status:
+        expectedStatus:
           type: string
           enum: [pending, missed]
           description: Optimistic guard; mismatch returns 409 with the current status.
@@ -1036,14 +1054,14 @@ components:
 
     Confirmation:
       type: object
-      required: [round_key, status, receipt]
+      required: [roundKey, status, receipt]
       properties:
-        round_key: { type: string }
+        roundKey: { type: string }
         status: { $ref: "#/components/schemas/RoundStatus" }
         receipt:
           type: string
           description: The sentence the Telegram hook posts today.
-        next_set: { $ref: "#/components/schemas/NextSet" }
+        nextSet: { $ref: "#/components/schemas/NextSet" }
         clock: { $ref: "#/components/schemas/Clock" }
 
     # ---------------------------------------------------------------- clocks
@@ -1052,14 +1070,14 @@ components:
       required: [bonus]
       properties:
         bonus: { type: integer, minimum: 0 }
-        next_set_at:
+        nextSetAt:
           type: [string, "null"]
           format: date-time
           description: Null while a round is open — the interval clock only runs between rounds.
 
     NextSet:
       type: object
-      required: [at, local, deferred, seconds_left]
+      required: [at, local, deferred, secondsLeft]
       properties:
         at: { type: string, format: date-time }
         local: { type: string, examples: ["16:19"] }
@@ -1068,7 +1086,7 @@ components:
           format: date-time
           description: Before the quiet window pushed it into the active window.
         deferred: { type: boolean }
-        seconds_left: { type: integer }
+        secondsLeft: { type: integer }
 
     AssignmentItem:
       type: object
@@ -1077,7 +1095,7 @@ components:
         id: { type: string }
         name: { type: string }
         reps: { type: integer }
-        form_url: { type: [string, "null"] }
+        formUrl: { type: [string, "null"] }
 
     # ---------------------------------------------------------------- checkins
     Readiness:
@@ -1089,7 +1107,7 @@ components:
         prs: { type: [integer, "null"] }
         at: { type: [string, "null"], format: date-time }
         pain: { type: boolean }
-        pain_where: { type: [string, "null"] }
+        painWhere: { type: [string, "null"] }
         hooper: { type: [number, "null"], minimum: 1, maximum: 5 }
         answers:
           type: array
@@ -1097,12 +1115,12 @@ components:
 
     CheckinTarget:
       type: object
-      required: [round_key, expires_at, seconds_left, exercises, muscles]
+      required: [roundKey, expiresAt, secondsLeft, exercises, muscles]
       properties:
-        round_key: { type: string }
+        roundKey: { type: string }
         at: { type: [string, "null"], format: date-time }
-        expires_at: { type: string, format: date-time }
-        seconds_left: { type: integer }
+        expiresAt: { type: string, format: date-time }
+        secondsLeft: { type: integer }
         exercises:
           type: array
           items:
@@ -1122,7 +1140,7 @@ components:
 
     CheckinTodo:
       type: object
-      required: [due, window_minutes, readiness]
+      required: [due, windowMinutes, readiness]
       properties:
         due:
           type: string
@@ -1133,17 +1151,17 @@ components:
             - $ref: "#/components/schemas/CheckinTarget"
             - type: "null"
           description: Present only when `due` is `post`.
-        expires_at: { type: [string, "null"], format: date-time }
-        seconds_left: { type: [integer, "null"] }
-        window_minutes: { type: integer }
+        expiresAt: { type: [string, "null"], format: date-time }
+        secondsLeft: { type: [integer, "null"] }
+        windowMinutes: { type: integer }
         readiness: { $ref: "#/components/schemas/Readiness" }
-        gate_answered:
+        gateAnswered:
           type: object
           description: Today's already-answered gate questions, so only the rest are asked.
           additionalProperties:
             type: [integer]
           example: { sleep: 4, stress: 2 }
-        last_gate:
+        lastGate:
           type: [object, "null"]
           additionalProperties: true
 
@@ -1173,20 +1191,20 @@ components:
         soreness: { type: [integer, "null"], minimum: 1, maximum: 5 }
         prs: { type: [integer, "null"], minimum: 0, maximum: 10, description: Perceived recovery status. }
         pain: { type: boolean, default: false }
-        pain_where: { type: [string, "null"], description: Muscle slug. }
+        painWhere: { type: [string, "null"], description: Muscle slug. }
         note: { type: [string, "null"], maxLength: 500 }
 
     PostCheckin:
       type: object
-      required: [kind, round_key]
+      required: [kind, roundKey]
       properties:
         kind: { const: post }
-        round_key: { type: string }
+        roundKey: { type: string }
         srpe: { type: [integer, "null"], minimum: 0, maximum: 10 }
         rir: { type: [integer, "null"], minimum: 0, maximum: 3 }
         stopper: { $ref: "#/components/schemas/Stopper" }
         reps: { type: [integer, "null"], description: "Reps actually completed, if different." }
-        muscle_soreness:
+        muscleSoreness:
           type: object
           description: Only muscles worked in that round; each 1–5, higher is worse.
           additionalProperties:
@@ -1200,25 +1218,26 @@ components:
       required: [id, kind, at]
       properties:
         id: { type: integer }
-        kind: { $ref: "#/components/schemas/CheckinKind" }
+        kind: { $ref: "#/components/schemas/CheckinKindStored" }
         at: { type: string, format: date-time }
-        local_date: { type: [string, "null"], format: date }
-        round_key: { type: [string, "null"] }
+        localDate: { type: [string, "null"], format: date }
+        roundKey: { type: [string, "null"] }
         sleep: { type: [integer, "null"] }
         stress: { type: [integer, "null"] }
         fatigue: { type: [integer, "null"] }
         soreness: { type: [integer, "null"] }
         prs: { type: [integer, "null"] }
         pain: { type: boolean }
-        pain_where: { type: [string, "null"] }
+        painWhere: { type: [string, "null"] }
         srpe: { type: [integer, "null"] }
         rir: { type: [integer, "null"] }
         stopper: { type: [string, "null"] }
-        per_muscle:
+        perMuscle:
           type: [object, "null"]
           additionalProperties:
             type: integer
         readiness: { type: [number, "null"] }
+        note: { type: [string, "null"] }
 
     CheckinResult:
       type: object
@@ -1237,13 +1256,13 @@ components:
               name: { type: string }
               wear: { type: number }
               soreness: { type: number }
-              k_before: { type: number }
-              k_after: { type: number }
+              kBefore: { type: number }
+              kAfter: { type: number }
 
     # ---------------------------------------------------------------- muscles
     MuscleState:
       type: object
-      required: [slug, name, region, sort, wear, soreness, load, stop_at, resume_at]
+      required: [slug, name, region, sort, wear, soreness, load, stopAt, resumeAt]
       properties:
         slug: { type: string }
         name: { type: string }
@@ -1252,14 +1271,14 @@ components:
         wear: { type: number, minimum: 0, maximum: 100 }
         soreness: { type: number, minimum: 0, maximum: 100 }
         load: { type: number, minimum: 0, maximum: 100, description: "max(wear, soreness)." }
-        stop_at: { type: number }
-        stop_effective:
+        stopAt: { type: number }
+        stopEffective:
           type: number
           description: The stop line after current readiness is applied.
-        resume_at: { type: number }
-        last_loaded_at: { type: [string, "null"], format: date-time }
+        resumeAt: { type: number }
+        lastLoadedAt: { type: [string, "null"], format: date-time }
         resting: { type: boolean }
-        rest_until: { type: [string, "null"], format: date-time }
+        restUntil: { type: [string, "null"], format: date-time }
 
     MuscleDetail:
       allOf:
@@ -1277,18 +1296,18 @@ components:
       properties:
         wear: { type: number, minimum: 0, maximum: 100 }
         soreness: { type: number, minimum: 0, maximum: 100 }
-        stop_at: { type: number, minimum: 0, maximum: 100 }
-        resume_at: { type: number, minimum: 0, maximum: 100 }
-        rest_until: { type: [string, "null"], format: date-time }
+        stopAt: { type: number, minimum: 0, maximum: 100 }
+        resumeAt: { type: number, minimum: 0, maximum: 100 }
+        restUntil: { type: [string, "null"], format: date-time }
         reason: { type: string, maxLength: 200 }
 
     LibraryRow:
       type: object
-      required: [exercise_slug, muscle_slug, role, weight, k, exposure]
+      required: [exerciseSlug, muscleSlug, role, weight, k, exposure]
       properties:
-        exercise_slug: { type: string }
-        muscle_slug: { type: string }
-        muscle_name: { type: string }
+        exerciseSlug: { type: string }
+        muscleSlug: { type: string }
+        muscleName: { type: string }
         role: { $ref: "#/components/schemas/StorageRole" }
         weight: { type: number }
         k: { type: number, description: Learned cost per rep. }
@@ -1297,13 +1316,16 @@ components:
     # ---------------------------------------------------------------- profile
     ProfileParam:
       type: object
-      required: [key, value, prior, n, updated_at]
+      required: [key, value, prior, n, fitted, updatedAt]
       properties:
         key: { type: string }
         value: { type: number }
         prior: { type: number }
         n: { type: integer }
-        updated_at: { type: string, format: date-time }
+        fitted:
+          type: boolean
+          description: True once enough observations exist to move the value off its prior.
+        updatedAt: { type: string, format: date-time }
 
     CalibrationPoint:
       type: object
@@ -1354,7 +1376,7 @@ components:
               key: { type: string }
               previous: { type: number }
               value: { type: number }
-        half_life: { type: number }
+        halfLife: { type: number }
 
     # ---------------------------------------------------------------- calendar
     CalendarDay:
@@ -1365,7 +1387,7 @@ components:
         done: { type: integer }
         reps: { type: integer }
         ratio: { type: number, minimum: 0, maximum: 1 }
-        by_ex:
+        byEx:
           type: object
           additionalProperties:
             type: integer
@@ -1385,10 +1407,10 @@ components:
 
     Months:
       type: object
-      required: [rounds_per_day, base_reps, current, history]
+      required: [roundsPerDay, baseReps, current, history]
       properties:
-        rounds_per_day: { type: integer }
-        base_reps: { type: integer }
+        roundsPerDay: { type: integer }
+        baseReps: { type: integer }
         current: { $ref: "#/components/schemas/CalendarMonth" }
         history:
           type: array
@@ -1396,7 +1418,10 @@ components:
 
     Calendar:
       type: object
-      required: [days, today, start, max_reps, months]
+      description: |
+        The year grid. `months` is not part of it: on `/dashboard` it is a sibling
+        (`calendar` + `months`), and `/calendar` merges the two for convenience.
+      required: [days, today, start, maxReps]
       properties:
         days:
           type: object
@@ -1404,40 +1429,40 @@ components:
           additionalProperties: { $ref: "#/components/schemas/CalendarDay" }
         today: { type: string, format: date }
         start: { type: string, format: date }
-        max_reps: { type: integer }
+        maxReps: { type: integer }
         months: { $ref: "#/components/schemas/Months" }
 
     # ---------------------------------------------------------------- dashboard
     DashboardSectionName:
       type: string
       enum:
-        - server_time
+        - serverTime
         - settings
         - clock
-        - next_set
-        - current_round
-        - next_assignment
+        - nextSet
+        - currentRound
+        - nextAssignment
         - lifetime
-        - recent_rounds
+        - recentRounds
         - calendar
         - months
         - muscles
         - readiness
-        - checkin_todo
+        - checkinTodo
         - profile
         - selection
         - unattributed
 
     RecentRound:
       type: object
-      required: [round_key, status, at, local, day, items]
+      required: [roundKey, status, at, local, day, exercises]
       properties:
-        round_key: { type: string }
+        roundKey: { type: string }
         status: { $ref: "#/components/schemas/RoundStatus" }
         at: { type: string, format: date-time }
         local: { type: string }
         day: { type: string, examples: ["14 Nov"] }
-        items:
+        exercises:
           type: array
           items:
             type: object
@@ -1447,12 +1472,12 @@ components:
 
     Lifetime:
       type: object
-      required: [total_reps, sets_done, sets_missed, exercises]
+      required: [totalReps, setsDone, setsMissed, exercises]
       properties:
-        total_reps: { type: integer }
-        sets_done: { type: integer }
-        sets_missed: { type: integer }
-        started_at: { type: [string, "null"], format: date-time }
+        totalReps: { type: integer }
+        setsDone: { type: integer }
+        setsMissed: { type: integer }
+        startedAt: { type: [string, "null"], format: date-time }
         exercises:
           type: array
           items:
@@ -1495,25 +1520,25 @@ components:
 
     Dashboard:
       type: object
-      required: [server_time]
+      required: [serverTime]
       properties:
-        server_time: { $ref: "#/components/schemas/ServerTime" }
+        serverTime: { $ref: "#/components/schemas/ServerTime" }
         settings: { $ref: "#/components/schemas/Settings" }
         clock: { $ref: "#/components/schemas/Clock" }
-        next_set:
+        nextSet:
           oneOf:
             - $ref: "#/components/schemas/NextSet"
             - type: "null"
-        current_round:
+        currentRound:
           oneOf:
             - $ref: "#/components/schemas/Round"
             - type: "null"
-        round_open: { type: boolean }
-        next_assignment:
+        roundOpen: { type: boolean }
+        nextAssignment:
           type: array
           items: { $ref: "#/components/schemas/AssignmentItem" }
         lifetime: { $ref: "#/components/schemas/Lifetime" }
-        recent_rounds:
+        recentRounds:
           type: array
           items: { $ref: "#/components/schemas/RecentRound" }
         calendar: { $ref: "#/components/schemas/Calendar" }
@@ -1522,7 +1547,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/MuscleState" }
         readiness: { $ref: "#/components/schemas/Readiness" }
-        checkin_todo: { $ref: "#/components/schemas/CheckinTodo" }
+        checkinTodo: { $ref: "#/components/schemas/CheckinTodo" }
         profile: { $ref: "#/components/schemas/Profile" }
         selection: { $ref: "#/components/schemas/Selection" }
         unattributed:
@@ -1533,10 +1558,10 @@ components:
     # ---------------------------------------------------------------- meta / auth
     Meta:
       type: object
-      required: [version, muscles, library, enums, server_time]
+      required: [version, muscles, library, enums, serverTime]
       properties:
         version: { type: string }
-        server_time: { $ref: "#/components/schemas/ServerTime" }
+        serverTime: { $ref: "#/components/schemas/ServerTime" }
         muscles:
           type: array
           description: The 22 groups in display order.
@@ -1562,53 +1587,57 @@ components:
                 items:
                   type: object
                   properties:
-                    muscle_slug: { type: string }
+                    muscleSlug: { type: string }
                     role: { $ref: "#/components/schemas/StorageRole" }
                     weight: { type: number }
         enums:
           type: object
-          required: [round_status, checkin_kind, stopper, storage_role]
+          required: [roundStatus, checkinKind, stopper, storageRole, muscles]
           properties:
-            round_status: { type: array, items: { $ref: "#/components/schemas/RoundStatus" } }
-            checkin_kind: { type: array, items: { $ref: "#/components/schemas/CheckinKind" } }
+            roundStatus: { type: array, items: { $ref: "#/components/schemas/RoundStatus" } }
+            checkinKind: { type: array, items: { $ref: "#/components/schemas/CheckinKind" } }
             stopper: { type: array, items: { $ref: "#/components/schemas/Stopper" } }
-            storage_role: { type: array, items: { $ref: "#/components/schemas/StorageRole" } }
+            storageRole: { type: array, items: { $ref: "#/components/schemas/StorageRole" } }
+            muscles:
+              type: array
+              description: The storage-role names, for a client that validates a settings body locally.
+              items: { type: string }
 
     PairInput:
       type: object
-      required: [code, device_name]
+      required: [code, deviceName]
       properties:
         code: { type: string, pattern: "^[0-9]{8}$" }
-        device_name: { type: string, maxLength: 60, examples: ["Pixel 9"] }
-        device_model: { type: string, maxLength: 60 }
+        deviceName: { type: string, maxLength: 60, examples: ["Pixel 9"] }
+        deviceModel: { type: string, maxLength: 60 }
         platform: { type: string, enum: [android, ios, cli] }
 
     TokenRotateInput:
       type: object
-      required: [device_id]
+      required: [deviceId]
       properties:
-        device_id: { type: string }
+        deviceId: { type: string }
 
     TokenResponse:
       type: object
-      required: [device_id, token, expires_at]
+      required: [deviceId, token, expiresAt]
       properties:
-        device_id: { type: string }
+        deviceId: { type: string }
         token: { type: string, description: Shown once; store it in the Keystore. }
-        expires_at: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
         device: { $ref: "#/components/schemas/Device" }
 
     Device:
       type: object
-      required: [id, name, created_at]
+      required: [id, name, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
         model: { type: [string, "null"] }
         platform: { type: [string, "null"] }
-        created_at: { type: string, format: date-time }
-        last_used_at: { type: [string, "null"], format: date-time }
-        push_enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        pushEnabled: { type: boolean }
 
     DeviceRegistration:
       type: object
