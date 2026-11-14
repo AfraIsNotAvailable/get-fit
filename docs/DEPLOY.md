@@ -43,21 +43,31 @@ the same `getfit.confirm()` the hook does, so a machine without Telegram is stil
 opening a port to pull code is a bad trade. The runner dials out to GitHub; GitHub hands it the job;
 the job calls `scripts/deploy.sh`, the same script you can run by hand.
 
-**Register the runner once, on this host:**
+**Registering the runner** (done on this box on 2026-11-14 — `/opt/data/actions-runner`, name
+`raspberrypi`, labels `self-hosted, getfit`, work dir `_work`):
 
 1. GitHub → the repo → *Settings → Actions → Runners → New self-hosted runner* (Linux/ARM64 here).
-2. Follow the shown download commands, then:
+2. Download per the shown commands, verify the sha256, extract.
+3. `./config.sh --url https://github.com/AfraIsNotAvailable/get-fit --token <TOKEN> --name <name>
+   --labels getfit --work _work --unattended --replace`
+4. Start it.
 
-   ```
-   ./config.sh --url https://github.com/AfraIsNotAvailable/get-fit --token <TOKEN> \
-               --labels getfit --name raspberrypi --work /opt/data/actions-runner
-   sudo ./svc.sh install && sudo ./svc.sh start
-   ```
+**Three things about this host that make the stock instructions not apply**, all handled by
+`start.sh`:
 
-   The `getfit` label is what `runs-on: [self-hosted, getfit]` matches — without it the job queues
-   forever.
-3. Optional: set the repo variable `GETFIT_HOME` if the checkout is not
-   `/opt/data/home/dev/web/get-fit`; port defaults to 8777.
+- **No systemd** (pid 1 is s6), so `svc.sh install` cannot work. The runner is started detached and
+  kept alive by the tick script (`/opt/data/scripts/getfit-tick.sh`), which resurrects it within a
+  minute of it dying — the same pattern that keeps the dashboard up.
+- **No root and no apt lists**, so `libicu` — which the bundled .NET wants — cannot be installed,
+  and `config.sh` refuses to run without it. A copy of Debian's `libicu76` is extracted under
+  `libicu/` and `start.sh` puts it on `LD_LIBRARY_PATH`.
+- `run.sh` and `start.sh` need `chmod +x` after extraction.
+
+The `getfit` label is what `runs-on: [self-hosted, getfit]` matches — without it the job queues
+forever. `self-hosted` is applied automatically, so `runs-on: self-hosted` also works.
+
+Optional: set the repo variable `GETFIT_HOME` if the checkout is not
+`/opt/data/home/dev/web/get-fit`; the port defaults to 8777.
 
 **What the deploy does**, in order: fetch → if HEAD already matches `origin/main`, health-check and
 stop (a push that touches nothing runtime-safe must not bounce the service) → park `getfit.db` →
